@@ -1,0 +1,69 @@
+[
+    {
+        "iconUrl": "https://dnvod.org/static/dnvod/icon.png",
+        "fileHash": "sha256-da6387706fb99b84920517c57aa4d5808456a7963897997f4b43041819d41ae8",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/tanchonglim/minor-stream-plugin",
+        "fileSize": 20814,
+        "status": 1,
+        "language": "zh",
+        "authors": [
+            "minor"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime",
+            "Documentary"
+        ],
+        "version": 8,
+        "internalName": "DnvodProvider",
+        "description": "Chinese streaming site - Movies, TV Shows, Anime, Variety, Documentaries",
+        "url": "https://raw.githubusercontent.com/tanchonglim/minor-stream-plugin/builds/DnvodProvider.cs3",
+        "name": "DnvodProvider"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=kuhh4jo.com&sz=64",
+        "fileHash": "sha256-8215c769ceaa723eda60b3f54cd90c23534e7325f34331099b78e49e32eb4253",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/tanchonglim/minor-stream-plugin",
+        "fileSize": 30466,
+        "status": 1,
+        "language": "zh",
+        "authors": [
+            "minor"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime"
+        ],
+        "version": 5,
+        "internalName": "Kuhh4joProvider",
+        "description": "\u7231\u7535\u5f71 - Chinese streaming site - Movies, TV Shows, Anime, Variety",
+        "url": "https://raw.githubusercontent.com/tanchonglim/minor-stream-plugin/builds/Kuhh4joProvider.cs3",
+        "name": "Kuhh4joProvider"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=yfsp.tv&sz=64",
+        "fileHash": "sha256-c6651f9087781ecb70018401c0169b971a104367a37a11f3aa39adb58577f39e",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/tanchonglim/minor-stream-plugin",
+        "fileSize": 35301,
+        "status": 1,
+        "language": "zh",
+        "authors": [
+            "minor"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime"
+        ],
+        "version": 6,
+        "internalName": "YfsptvProvider",
+        "description": "\u7231\u58f9\u5e06 (yfsp.tv) - Chinese streaming site - Movies, TV, Variety, Anime",
+        "url": "https://raw.githubusercontent.com/tanchonglim/minor-stream-plugin/builds/YfsptvProvider.cs3",
+        "name": "YfsptvProvider"
+    }
+]
