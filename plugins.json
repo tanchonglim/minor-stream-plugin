@@ -1,0 +1,71 @@
+[
+    {
+        "iconUrl": "https://dnvod.org/static/dnvod/icon.png",
+        "fileHash": "sha256-da6387706fb99b84920517c57aa4d5808456a7963897997f4b43041819d41ae8",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/tanchonglim/minor-stream-plugin",
+        "fileSize": 20814,
+        "status": 1,
+        "language": "zh",
+        "authors": [
+            "minor"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime",
+            "Documentary"
+        ],
+        "version": 8,
+        "internalName": "DnvodProvider",
+        "description": "Chinese streaming site - Movies, TV Shows, Anime, Variety, Documentaries",
+        "url": "https://raw.githubusercontent.com/tanchonglim/minor-stream-plugin/builds/DnvodProvider.cs3",
+        "name": "DnvodProvider"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=gimy.se&sz=%size%",
+        "fileHash": "sha256-57224504be1ad7c400702f397a8f32ec46ba504c0145c1be11f6a113d00eaafa",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/tanchonglim/minor-stream-plugin",
+        "fileSize": 22014,
+        "status": 1,
+        "language": "zh",
+        "authors": [
+            "minor"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime",
+            "AnimeMovie",
+            "Documentary"
+        ],
+        "version": 2,
+        "internalName": "GimyProvider",
+        "description": "\u5287\u8ff7 Gimy (gimy.se) - Movies, TV Shows, Variety, Anime, Documentaries",
+        "url": "https://raw.githubusercontent.com/tanchonglim/minor-stream-plugin/builds/GimyProvider.cs3",
+        "name": "GimyProvider"
+    },
+    {
+        "iconUrl": "https://www.google.com/s2/favicons?domain=kuhh4jo.com&sz=64",
+        "fileHash": "sha256-8215c769ceaa723eda60b3f54cd90c23534e7325f34331099b78e49e32eb4253",
+        "apiVersion": 1,
+        "repositoryUrl": "https://github.com/tanchonglim/minor-stream-plugin",
+        "fileSize": 30466,
+        "status": 1,
+        "language": "zh",
+        "authors": [
+            "minor"
+        ],
+        "tvTypes": [
+            "Movie",
+            "TvSeries",
+            "Anime"
+        ],
+        "version": 5,
+        "internalName": "Kuhh4joProvider",
+        "description": "\u7231\u7535\u5f71 - Chinese streaming site - Movies, TV Shows, Anime, Variety",
+        "url": "https://raw.githubusercontent.com/tanchonglim/minor-stream-plugin/builds/Kuhh4joProvider.cs3",
+        "name": "Kuhh4joProvider"
+    }
+]
