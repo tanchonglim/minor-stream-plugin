@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:recloudstream.github.io)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:dnvod.org)",
+      "WebSearch",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:codeberg.org)",
+      "WebFetch(domain:cloudstream.miraheze.org)",
+      "Bash(curl:*)",
+      "Bash(./gradlew.bat:*)",
+      "Bash(where:*)"
+    ]
+  }
+}
