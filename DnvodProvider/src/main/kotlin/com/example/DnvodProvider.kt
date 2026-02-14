@@ -56,6 +56,70 @@ class DnvodProvider : MainAPI() {
         }
     }
 
+    // Spec: (play|vod_plays)/([^#?]+) → segment; segment with -ep\d+ → id:::suffix, else id
+    private val playOrVodHrefRegex = Regex("/(play|vod_plays)/([^#?]+)")
+    private val segmentEpRegex = Regex("(\\d+)-(.+)", RegexOption.IGNORE_CASE)
+    private val playLinkFallbackRegex = Regex("/play/(\\d+)-ep(\\d+)", RegexOption.IGNORE_CASE)
+
+    /** Parse episode list per movie_link_logic: primary container, then fallback play links, then default single episode. */
+    private fun parseEpisodes(document: org.jsoup.nodes.Document, detailUrl: String): List<Episode> {
+        // 1. Primary: .row.list-unstyled.my-gutters-2, direct children, a[href*=/play/] or a[href*=/vod_plays/]
+        val container = document.selectFirst(".row.list-unstyled.my-gutters-2")
+        if (container != null) {
+            val fromContainer = container.children().mapIndexedNotNull { index, child ->
+                val anchor = child.selectFirst("a[href*=/play/], a[href*=/vod_plays/]") ?: return@mapIndexedNotNull null
+                val href = anchor.attr("href").split("#").first().trim()
+                val segmentMatch = playOrVodHrefRegex.find(href) ?: return@mapIndexedNotNull null
+                val segment = segmentMatch.groupValues[2]
+                val label = anchor.text().trim().ifEmpty { "第${index + 1}集" }
+                val sid = Regex("-ep(\\d+)", RegexOption.IGNORE_CASE).find(segment)?.groupValues?.get(1)?.let { "ep$it" }
+                    ?: "ep${index + 1}"
+                val (episodeData, epNum) = segmentToEpisodeData(segment)
+                newEpisode(episodeData) {
+                    this.name = label
+                    if (epNum != null) this.episode = epNum
+                }
+            }
+            if (fromContainer.isNotEmpty()) return fromContainer
+        }
+
+        // 2. Fallback: a[href*=/play/] with /play/(\d+)-ep(\d+)
+        val fallbackLinks = document.select("a[href*=/play/]")
+        val fromFallback = fallbackLinks.mapNotNull { anchor ->
+            val href = anchor.attr("href").split("#").first()
+            val match = playLinkFallbackRegex.find(href) ?: return@mapNotNull null
+            val vodId = match.groupValues[1]
+            val epIndex = match.groupValues[2].toIntOrNull() ?: return@mapNotNull null
+            val label = anchor.text().trim().ifEmpty { "第${epIndex}集" }
+            newEpisode("$vodId:::ep$epIndex") {
+                this.name = label
+                this.episode = epIndex
+            }
+        }.distinctBy { it.data }
+        if (fromFallback.isNotEmpty()) return fromFallback
+
+        // 3. Default: single episode (vodId from detail URL)
+        val vodId = Regex("/(\\d+)(?:/)?$").find(detailUrl)?.groupValues?.get(1) ?: return emptyList()
+        return listOf(
+            newEpisode("$vodId:::ep1") {
+                this.name = "第1集"
+                this.episode = 1
+            }
+        )
+    }
+
+    private fun segmentToEpisodeData(segment: String): Pair<String, Int?> {
+        val m = segmentEpRegex.find(segment) ?: return (Regex("^(\\d+)").find(segment)?.groupValues?.get(1) ?: segment) to null
+        val id = m.groupValues[1]
+        val suffix = m.groupValues[2]
+        return if (suffix.startsWith("ep", ignoreCase = true)) {
+            val num = suffix.drop(2).toIntOrNull()
+            "$id:::$suffix" to num
+        } else {
+            id to null
+        }
+    }
+
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = if (page <= 1) {
             "$mainUrl${request.data}"
@@ -116,29 +180,8 @@ class DnvodProvider : MainAPI() {
         // Parse plot
         val plot = introDiv?.selectFirst("small.text-secondary")?.text()?.trim()
 
-        // Parse episode list
-        val episodes = document.select("ul.list-unstyled a.ep-btn").mapNotNull { epElement ->
-            val epHref = epElement.attr("href") ?: return@mapNotNull null
-            val epName = epElement.text().trim()
-            // Extract play data from href like /play/202632236-ep1 or /play/202681548-m#yu_gao_pian
-            val playData = epHref.split("#").first() // Remove fragment
-            val match = Regex("/play/(\\d+)-(.+)").find(playData) ?: return@mapNotNull null
-            val id = match.groupValues[1]
-            val suffix = match.groupValues[2]
-            // For ep links: pass "id:::ep1", for non-ep links (like "m"): pass just "id"
-            val episodeData = if (suffix.startsWith("ep")) "$id:::$suffix" else id
-            val epNum = if (suffix.startsWith("ep")) {
-                suffix.removePrefix("ep").toIntOrNull()
-            } else null
-            newEpisode(episodeData) {
-                this.name = epName
-                if (epNum != null) {
-                    this.episode = epNum
-                }
-            }
-        }
-
-        // Sort episodes by number (they come in descending order on the page)
+        // Parse episode list (spec: container → fallback play links → default single episode)
+        val episodes = parseEpisodes(document, url)
         val sortedEpisodes = episodes.sortedBy { it.episode ?: Int.MAX_VALUE }
 
         val type = getTypeFromUrl(url)
@@ -179,6 +222,8 @@ class DnvodProvider : MainAPI() {
 
     data class VideoPlay(
         @JsonProperty("play_data") val playData: String?,
+        @JsonProperty("name") val name: String?,
+        @JsonProperty("title") val title: String?,
         @JsonProperty("src_site") val srcSite: String?
     )
 
@@ -205,7 +250,10 @@ class DnvodProvider : MainAPI() {
 
         plays.forEachIndexed { index, play ->
             val m3u8Url = play.playData ?: return@forEachIndexed
-            val sourceName = play.srcSite?.uppercase() ?: "Source ${index + 1}"
+            val sourceName = play.name?.trim()?.takeIf { it.isNotEmpty() }
+                ?: play.title?.trim()?.takeIf { it.isNotEmpty() }
+                ?: play.srcSite?.trim()?.takeIf { it.isNotEmpty() }?.uppercase()
+                ?: "线路 ${index + 1}"
             callback.invoke(
                 newExtractorLink(
                     source = this.name,
