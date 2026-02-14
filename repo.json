@@ -1,0 +1,6 @@
+{
+  "name": "minor-movie",
+  "description": "okok",
+  "manifestVersion": 1,
+  "pluginLists": ["https://raw.githubusercontent.com/tanchonglim/minor-stream-plugin/refs/heads/builds/plugins.json"]
+}
