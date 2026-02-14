@@ -120,15 +120,18 @@ class DnvodProvider : MainAPI() {
         val episodes = document.select("ul.list-unstyled a.ep-btn").mapNotNull { epElement ->
             val epHref = epElement.attr("href") ?: return@mapNotNull null
             val epName = epElement.text().trim()
-            // Extract the play data from href like /play/202632236-ep1 or /play/202681548-m
+            // Extract play data from href like /play/202632236-ep1 or /play/202681548-m#yu_gao_pian
             val playData = epHref.split("#").first() // Remove fragment
             val match = Regex("/play/(\\d+)-(.+)").find(playData) ?: return@mapNotNull null
             val id = match.groupValues[1]
             val suffix = match.groupValues[2]
-            newEpisode("$id:::$suffix") {
+            // For ep links: pass "id:::ep1", for non-ep links (like "m"): pass just "id"
+            val episodeData = if (suffix.startsWith("ep")) "$id:::$suffix" else id
+            val epNum = if (suffix.startsWith("ep")) {
+                suffix.removePrefix("ep").toIntOrNull()
+            } else null
+            newEpisode(episodeData) {
                 this.name = epName
-                // Try to extract episode number
-                val epNum = Regex("\\d+").find(suffix)?.value?.toIntOrNull()
                 if (epNum != null) {
                     this.episode = epNum
                 }
@@ -147,13 +150,12 @@ class DnvodProvider : MainAPI() {
             ?.mapNotNull { it.toSearchResult() }
 
         return if (type == TvType.Movie && sortedEpisodes.size <= 1) {
-            // Extract movie play data
+            // Extract movie play data (just the ID, non-ep links use /vod_plays/{id}/)
             val dataUrl = if (sortedEpisodes.isNotEmpty()) {
                 sortedEpisodes.first().data
             } else {
-                // Fallback: extract ID from URL and use "m" suffix
-                val id = Regex("/(\\d+)$").find(url)?.groupValues?.get(1) ?: ""
-                "$id:::m"
+                // Fallback: extract ID from URL
+                Regex("/(\\d+)$").find(url)?.groupValues?.get(1) ?: ""
             }
             newMovieLoadResponse(title, url, TvType.Movie, dataUrl) {
                 this.posterUrl = posterUrl
@@ -190,13 +192,15 @@ class DnvodProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // data format: "id:::suffix" e.g. "202632236:::ep1" or "202681548:::m"
-        val parts = data.split(":::")
-        if (parts.size != 2) return false
-        val id = parts[0]
-        val suffix = parts[1]
+        // data format: "id:::ep1" for episodes, or just "id" for movies/non-ep content
+        val apiUrl = if (data.contains(":::")) {
+            val parts = data.split(":::")
+            "$mainUrl/vod_plays/${parts[0]}/${parts[1]}"
+        } else {
+            "$mainUrl/vod_plays/$data/"
+        }
 
-        val response = app.get("$mainUrl/vod_plays/$id/$suffix").parsed<VodPlaysResponse>()
+        val response = app.get(apiUrl).parsed<VodPlaysResponse>()
         val plays = response.videoPlays ?: return false
 
         plays.forEachIndexed { index, play ->
