@@ -12,7 +12,14 @@
       "WebFetch(domain:cloudstream.miraheze.org)",
       "Bash(curl:*)",
       "Bash(./gradlew.bat:*)",
-      "Bash(where:*)"
+      "Bash(where:*)",
+      "Bash(git -C /c/Users/User/Desktop/minor-stream-plugin log --oneline -10)",
+      "mcp__playwright__browser_navigate",
+      "mcp__playwright__browser_evaluate",
+      "mcp__playwright__browser_network_requests",
+      "mcp__playwright__browser_type",
+      "mcp__playwright__browser_close",
+      "Bash(./gradlew DubokuProvider:make:*)"
     ]
   }
 }
