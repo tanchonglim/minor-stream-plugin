@@ -4,8 +4,9 @@ import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
-import com.lagradost.cloudstream3.utils.newExtractorLink
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.lagradost.cloudstream3.utils.newExtractorLink
 import org.jsoup.nodes.Element
 
 class DnvodProvider : MainAPI() {
@@ -220,6 +221,7 @@ class DnvodProvider : MainAPI() {
         }
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class VideoPlay(
         @JsonProperty("play_data") val playData: String?,
         @JsonProperty("name") val name: String?,
@@ -227,6 +229,7 @@ class DnvodProvider : MainAPI() {
         @JsonProperty("src_site") val srcSite: String?
     )
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
     data class VodPlaysResponse(
         @JsonProperty("video_plays") val videoPlays: List<VideoPlay>?
     )
