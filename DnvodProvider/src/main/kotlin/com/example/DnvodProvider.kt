@@ -21,6 +21,10 @@ class DnvodProvider : MainAPI() {
         TvType.Documentary
     )
 
+    private val headers = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+    )
+
     override val mainPage = mainPageOf(
         "/tv/list/" to "电视剧",
         "/movie/list/" to "电影",
@@ -127,7 +131,7 @@ class DnvodProvider : MainAPI() {
         } else {
             "$mainUrl${request.data}?page=$page"
         }
-        val document = app.get(url).document
+        val document = app.get(url, headers = headers).document
         val items = document.select("div.row.my-gutters-1 > div").mapNotNull { card ->
             card.toSearchResult()
         }
@@ -142,14 +146,14 @@ class DnvodProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("$mainUrl/search?q=$query").document
+        val document = app.get("$mainUrl/search?q=$query", headers = headers).document
         return document.select("div.row.my-gutters-1 > div").mapNotNull { card ->
             card.toSearchResult()
         }
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url).document
+        val document = app.get(url, headers = headers).document
 
         val title = document.selectFirst("h1.title")?.text()?.trim()
             ?: throw ErrorLoadingException("No title found")
@@ -241,18 +245,19 @@ class DnvodProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         // data format: "id:::ep1" for episodes, or just "id" for movies/non-ep content
-        val apiUrl = if (data.contains(":::")) {
+        val (apiUrl, refererUrl) = if (data.contains(":::")) {
             val parts = data.split(":::")
-            "$mainUrl/vod_plays/${parts[0]}/${parts[1]}"
+            "$mainUrl/vod_plays/${parts[0]}/${parts[1]}" to "$mainUrl/play/${parts[0]}-${parts[1]}"
         } else {
-            "$mainUrl/vod_plays/$data/"
+            "$mainUrl/vod_plays/$data/" to "$mainUrl/play/$data"
         }
 
-        val response = app.get(apiUrl).parsed<VodPlaysResponse>()
+        val response = app.get(apiUrl, headers = headers + mapOf("Referer" to refererUrl)).parsed<VodPlaysResponse>()
         val plays = response.videoPlays ?: return false
 
         plays.forEachIndexed { index, play ->
             val m3u8Url = play.playData ?: return@forEachIndexed
+            if (m3u8Url.isBlank()) return@forEachIndexed
             val sourceName = play.name?.trim()?.takeIf { it.isNotEmpty() }
                 ?: play.title?.trim()?.takeIf { it.isNotEmpty() }
                 ?: play.srcSite?.trim()?.takeIf { it.isNotEmpty() }?.uppercase()

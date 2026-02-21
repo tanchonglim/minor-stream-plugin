@@ -18,6 +18,11 @@ class DubokuProvider : MainAPI() {
         TvType.Anime
     )
 
+    private val headers = mapOf(
+        "User-Agent" to "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
+        "Accept-Language" to "zh-CN,zh;q=0.9,en;q=0.8"
+    )
+
     override val mainPage = mainPageOf(
         "/vodshow/13-----------.html" to "陆剧",
         "/vodshow/16-----------.html" to "日韩剧",
@@ -47,7 +52,7 @@ class DubokuProvider : MainAPI() {
             val base = request.data.replace("-----------.html", "")
             "$mainUrl${base}--------${page}---.html"
         }
-        val document = app.get(url).document
+        val document = app.get(url, headers = headers).document
         val items = document.select(".myui-vodlist li").mapNotNull { card ->
             card.toSearchResult()
         }
@@ -62,7 +67,7 @@ class DubokuProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("$mainUrl/vodsearch/-------------.html?wd=$query").document
+        val document = app.get("$mainUrl/vodsearch/-------------.html?wd=$query", headers = headers).document
         return document.select(".myui-vodlist li").mapNotNull { card ->
             val titleEl = card.selectFirst("h4 a, .detail a") ?: return@mapNotNull null
             val title = titleEl.text().trim()
@@ -76,7 +81,7 @@ class DubokuProvider : MainAPI() {
     }
 
     override suspend fun load(url: String): LoadResponse {
-        val document = app.get(url).document
+        val document = app.get(url, headers = headers).document
 
         val title = document.selectFirst("h1")?.text()?.trim()
             ?: throw ErrorLoadingException("No title found")
@@ -200,7 +205,7 @@ class DubokuProvider : MainAPI() {
         for (sid in sourceIndices) {
             try {
                 val playUrl = "$mainUrl/vodplay/$vodId-$sid-$epIdx.html"
-                val html = app.get(playUrl).text
+                val html = app.get(playUrl, headers = headers).text
                 val match = playerRegex.find(html) ?: continue
                 val jsonStr = match.groupValues[1]
 
@@ -221,8 +226,10 @@ class DubokuProvider : MainAPI() {
                     else -> fromSource.uppercase()
                 }
 
-                // Only use direct m3u8 URLs or URLs that look like direct video
+                if (videoUrl.isBlank()) continue
+
                 if (videoUrl.contains(".m3u8") || videoUrl.contains(".mp4")) {
+                    // Direct video URL
                     callback.invoke(
                         newExtractorLink(
                             source = this.name,
@@ -235,6 +242,10 @@ class DubokuProvider : MainAPI() {
                         }
                     )
                     found = true
+                } else {
+                    // Indirect URL (bilibili, youku, etc.) - try CloudStream3 extractors
+                    val extracted = loadExtractor(videoUrl, mainUrl, subtitleCallback, callback)
+                    if (extracted) found = true
                 }
             } catch (_: Exception) {
                 continue
