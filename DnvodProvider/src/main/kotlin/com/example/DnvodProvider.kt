@@ -250,9 +250,9 @@ class DnvodProvider : MainAPI() {
 
         val (apiUrl, refererUrl) = if (cleanData.contains(":::")) {
             val parts = cleanData.split(":::")
-            "$mainUrl/vod_plays/${parts[0]}/${parts[1]}/" to "$mainUrl/play/${parts[0]}-${parts[1]}"
+            "$mainUrl/vod_plays/${parts[0]}/${parts[1]}" to "$mainUrl/play/${parts[0]}-${parts[1]}"
         } else {
-            "$mainUrl/vod_plays/$cleanData/" to "$mainUrl/play/$cleanData"
+            "$mainUrl/vod_plays/$cleanData" to "$mainUrl/play/$cleanData"
         }
 
         val response = try {
