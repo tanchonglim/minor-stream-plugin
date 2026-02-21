@@ -68,11 +68,11 @@ class DubokuProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("$mainUrl/vodsearch/-------------.html?wd=$query", headers = headers).document
-        return document.select(".myui-vodlist li").mapNotNull { card ->
+        return document.select(".myui-vodlist__media li").mapNotNull { card ->
             val titleEl = card.selectFirst("h4 a, .detail a") ?: return@mapNotNull null
             val title = titleEl.text().trim()
             val href = fixUrl(titleEl.attr("href"))
-            val posterUrl = fixUrlNull(card.selectFirst("a.myui-vodlist__thumb img, .myui-vodlist__thumb")?.attr("data-original"))
+            val posterUrl = fixUrlNull(card.selectFirst("a.myui-vodlist__thumb")?.attr("data-original"))
 
             newMovieSearchResponse(title, href, TvType.Movie) {
                 this.posterUrl = posterUrl
