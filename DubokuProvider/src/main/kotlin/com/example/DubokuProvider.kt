@@ -132,8 +132,8 @@ class DubokuProvider : MainAPI() {
             } ?: emptyList()
             if (eps.isNotEmpty()) {
                 allSourceEpisodes[tabName] = eps
-                // Extract source index from first episode href: /vodplay/{id}-{sourceIdx}-{epIdx}.html
-                val match = Regex("/vodplay/\\d+-(\\d+)-\\d+\\.html").find(eps.first().second)
+                // Extract source index from first episode href: vodplay/{id}-{sourceIdx}-{epIdx}.html
+                val match = Regex("vodplay/\\d+-(\\d+)-\\d+\\.html").find(eps.first().second)
                 match?.groupValues?.get(1)?.toIntOrNull()?.let { sourceIndices.add(it) }
             }
         }
@@ -142,7 +142,7 @@ class DubokuProvider : MainAPI() {
         val primarySource = allSourceEpisodes.maxByOrNull { it.value.size }
         val episodes = primarySource?.value?.mapIndexed { index, (label, href) ->
             // Extract vodId and episode index from href
-            val m = Regex("/vodplay/(\\d+)-(\\d+)-(\\d+)\\.html").find(href)
+            val m = Regex("vodplay/(\\d+)-(\\d+)-(\\d+)\\.html").find(href)
             val vodId = m?.groupValues?.get(1) ?: ""
             val epIdx = m?.groupValues?.get(3) ?: "${index + 1}"
             // Store vodId, episode index, and all available source indices
