@@ -244,6 +244,18 @@ class DnvodProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        // TODO: Hardcoded test URL - remove after verifying player works
+        callback.invoke(
+            newExtractorLink(
+                source = this.name,
+                name = "$name - Test",
+                url = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+                type = ExtractorLinkType.M3U8
+            ) {
+                this.quality = Qualities.Unknown.value
+            }
+        )
+
         // data format: "id:::ep1" for episodes, or just "id" for movies/non-ep content
         val (apiUrl, refererUrl) = if (data.contains(":::")) {
             val parts = data.split(":::")
