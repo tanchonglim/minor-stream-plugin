@@ -1,7 +1,7 @@
 import org.jetbrains.kotlin.konan.properties.Properties
 
 // use an integer for version numbers
-version = 60
+version = 61
 
 
 android {
@@ -11,12 +11,15 @@ android {
     }
     defaultConfig {
         val properties = Properties()
-        properties.load(project.rootProject.file("local.properties").inputStream())
+        val localPropsFile = project.rootProject.file("local.properties")
+        if (localPropsFile.exists()) {
+            properties.load(localPropsFile.inputStream())
+        }
         android.buildFeatures.buildConfig=true
-        buildConfigField("String", "KAISVA", "\"${properties.getProperty("KAISVA")}\"")
-        buildConfigField("String", "KAIDEC", "\"${properties.getProperty("KAIDEC")}\"")
-        buildConfigField("String", "KAIENC", "\"${properties.getProperty("KAIENC")}\"")
-        buildConfigField("String", "KAIMEG", "\"${properties.getProperty("KAIMEG")}\"")
+        buildConfigField("String", "KAISVA", "\"${properties.getProperty("KAISVA") ?: ""}\"")
+        buildConfigField("String", "KAIDEC", "\"${properties.getProperty("KAIDEC") ?: ""}\"")
+        buildConfigField("String", "KAIENC", "\"${properties.getProperty("KAIENC") ?: ""}\"")
+        buildConfigField("String", "KAIMEG", "\"${properties.getProperty("KAIMEG") ?: ""}\"")
 
 
     }
