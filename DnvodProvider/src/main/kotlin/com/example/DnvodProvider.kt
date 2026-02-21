@@ -257,14 +257,21 @@ class DnvodProvider : MainAPI() {
         )
 
         // data format: "id:::ep1" for episodes, or just "id" for movies/non-ep content
-        val (apiUrl, refererUrl) = if (data.contains(":::")) {
-            val parts = data.split(":::")
-            "$mainUrl/vod_plays/${parts[0]}/${parts[1]}" to "$mainUrl/play/${parts[0]}-${parts[1]}"
+        // Strip mainUrl prefix if present (CloudStream may prepend it)
+        val cleanData = data.removePrefix(mainUrl).removePrefix("/")
+
+        val (apiUrl, refererUrl) = if (cleanData.contains(":::")) {
+            val parts = cleanData.split(":::")
+            "$mainUrl/vod_plays/${parts[0]}/${parts[1]}/" to "$mainUrl/play/${parts[0]}-${parts[1]}"
         } else {
-            "$mainUrl/vod_plays/$data/" to "$mainUrl/play/$data"
+            "$mainUrl/vod_plays/$cleanData/" to "$mainUrl/play/$cleanData"
         }
 
-        val response = app.get(apiUrl, headers = headers + mapOf("Referer" to refererUrl)).parsed<VodPlaysResponse>()
+        val response = try {
+            app.get(apiUrl, headers = headers + mapOf("Referer" to refererUrl)).parsed<VodPlaysResponse>()
+        } catch (_: Exception) {
+            return false
+        }
         val plays = response.videoPlays ?: return false
 
         plays.forEachIndexed { index, play ->
