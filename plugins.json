@@ -1,0 +1,63 @@
+[
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=onetouchtv.xyz/&sz=%size%",
+    "jarFileSize": 166595,
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/phisher98/cloudstream-extensions-phisher",
+    "fileSize": 37380,
+    "status": 1,
+    "language": "en",
+    "authors": ["Phisher98"],
+    "tvTypes": ["AsianDrama", "TvSeries"],
+    "version": 1,
+    "internalName": "OneTouchTV",
+    "jarUrl": "https://raw.githubusercontent.com/phisher98/cloudstream-extensions-phisher/builds/OneTouchTV.jar",
+    "description": "Asian Dramas",
+    "url": "https://raw.githubusercontent.com/phisher98/cloudstream-extensions-phisher/builds/OneTouchTV.cs3",
+    "name": "OneTouchTV"
+  },
+  {
+    "iconUrl": "https://raw.githubusercontent.com/phisher98/TVVVV/refs/heads/main/Icons/4KHDHUB-Bright-Logo.png",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/phisher98/cloudstream-extensions-phisher",
+    "fileSize": 67033,
+    "status": 1,
+    "language": "en",
+    "authors": ["Phisher98"],
+    "tvTypes": ["Movie", "TvSeries"],
+    "version": 29,
+    "internalName": "FourKHDHub",
+    "description": "4K Movies Extension by HDHUB4U",
+    "url": "https://raw.githubusercontent.com/phisher98/cloudstream-extensions-phisher/builds/FourKHDHub.cs3",
+    "name": "FourKHDHub"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=hianime.to&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/phisher98/cloudstream-extensions-phisher",
+    "fileSize": 57836,
+    "status": 1,
+    "language": "en",
+    "authors": ["Stormunblessed, KillerDogeEmpire,RowdyRushya,Phisher98"],
+    "tvTypes": ["Anime", "OVA"],
+    "version": 30,
+    "internalName": "HiAnime",
+    "url": "https://raw.githubusercontent.com/phisher98/cloudstream-extensions-phisher/builds/HiAnime.cs3",
+    "name": "HiAnime"
+  },
+  {
+    "iconUrl": "https://www.google.com/s2/favicons?domain=animekai.to&sz=%size%",
+    "apiVersion": 1,
+    "repositoryUrl": "https://github.com/phisher98/cloudstream-extensions-phisher",
+    "fileSize": 56399,
+    "status": 1,
+    "language": "en",
+    "authors": ["Phisher98"],
+    "tvTypes": ["Anime", "OVA", "AnimeMovie"],
+    "version": 60,
+    "internalName": "AnimeKai",
+    "description": "Animes & Animes Movie",
+    "url": "https://raw.githubusercontent.com/phisher98/cloudstream-extensions-phisher/builds/AnimeKai.cs3",
+    "name": "AnimeKai"
+  }
+]
