@@ -48,7 +48,7 @@ class DubokuProvider : MainAPI() {
             "$mainUrl${base}--------${page}---.html"
         }
         val document = app.get(url).document
-        val items = document.select(".myui-vodlist li, .myui-vodlist__box").mapNotNull { card ->
+        val items = document.select(".myui-vodlist li").mapNotNull { card ->
             card.toSearchResult()
         }
         return newHomePageResponse(
@@ -63,7 +63,7 @@ class DubokuProvider : MainAPI() {
 
     override suspend fun search(query: String): List<SearchResponse> {
         val document = app.get("$mainUrl/vodsearch/-------------.html?wd=$query").document
-        return document.select(".myui-vodlist__box, .searchlist_item").mapNotNull { card ->
+        return document.select(".myui-vodlist li").mapNotNull { card ->
             val titleEl = card.selectFirst("h4 a, .detail a") ?: return@mapNotNull null
             val title = titleEl.text().trim()
             val href = fixUrl(titleEl.attr("href"))
