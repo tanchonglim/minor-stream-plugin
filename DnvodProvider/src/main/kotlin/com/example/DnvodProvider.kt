@@ -65,6 +65,9 @@ class DnvodProvider : MainAPI() {
     private val playOrVodHrefRegex = Regex("/(play|vod_plays)/([^#?]+)")
     private val segmentEpRegex = Regex("(\\d+)-(.+)", RegexOption.IGNORE_CASE)
     private val playLinkFallbackRegex = Regex("/play/(\\d+)-ep(\\d+)", RegexOption.IGNORE_CASE)
+    private val vodPlaysJsRegex = Regex(
+        """/vod_plays/\{0\}/\{1\}'\.replace\('\{0\}',\s*'([^']*)'\)\.replace\('\{1\}',\s*'([^']*)'\)"""
+    )
 
     /** Parse episode list per movie_link_logic: primary container, then fallback play links, then default single episode. */
     private fun parseEpisodes(document: org.jsoup.nodes.Document, detailUrl: String): List<Episode> {
@@ -121,8 +124,15 @@ class DnvodProvider : MainAPI() {
             val num = suffix.drop(2).toIntOrNull()
             "$id:::$suffix" to num
         } else {
-            id to null
+            segment to null   // was: id to null
         }
+    }
+
+    private fun extractVodPlaysPath(html: String): String? {
+        val match = vodPlaysJsRegex.find(html) ?: return null
+        val id = match.groupValues[1].trim()
+        val ep = match.groupValues[2].trim()
+        return if (ep.isEmpty()) "/vod_plays/$id" else "/vod_plays/$id/$ep"
     }
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
@@ -248,11 +258,28 @@ class DnvodProvider : MainAPI() {
         // Strip mainUrl prefix if present (CloudStream may prepend it)
         val cleanData = data.removePrefix(mainUrl).removePrefix("/")
 
-        val (apiUrl, refererUrl) = if (cleanData.contains(":::")) {
+        // Build play page URL (referer) from stored data
+        val refererUrl = if (cleanData.contains(":::")) {
             val parts = cleanData.split(":::")
-            "$mainUrl/vod_plays/${parts[0]}/${parts[1]}" to "$mainUrl/play/${parts[0]}-${parts[1]}"
+            "$mainUrl/play/${parts[0]}-${parts[1]}"
         } else {
-            "$mainUrl/vod_plays/$cleanData" to "$mainUrl/play/$cleanData"
+            "$mainUrl/play/$cleanData"
+        }
+
+        // Fetch play page and extract vod_plays path from embedded JS
+        val apiUrl = try {
+            val html = app.get(refererUrl, headers = headers).text
+            extractVodPlaysPath(html)?.let { "$mainUrl$it" }
+        } catch (_: Exception) {
+            null
+        } ?: run {
+            // Fallback: derive from episode data directly
+            if (cleanData.contains(":::")) {
+                val parts = cleanData.split(":::")
+                "$mainUrl/vod_plays/${parts[0]}/${parts[1]}"
+            } else {
+                "$mainUrl/vod_plays/$cleanData"
+            }
         }
 
         val response = try {
