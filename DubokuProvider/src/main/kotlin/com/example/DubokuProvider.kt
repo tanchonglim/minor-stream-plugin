@@ -195,11 +195,19 @@ class DubokuProvider : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
         // data format: "vodId:::epIdx:::sourceIdx1,sourceIdx2,..."
-        val parts = data.split(":::")
-        if (parts.size < 3) return false
+        // Strip mainUrl prefix if present (CloudStream may prepend it)
+        val cleanData = data.removePrefix(mainUrl).removePrefix("/")
+
+        val parts = cleanData.split(":::")
+        if (parts.size < 2) return false
         val vodId = parts[0]
         val epIdx = parts[1]
-        val sourceIndices = parts[2].split(",").mapNotNull { it.toIntOrNull() }
+        // Fall back to source index 1 if the third part is missing or empty
+        val sourceIndices = if (parts.size >= 3) {
+            parts[2].split(",").mapNotNull { it.toIntOrNull() }
+        } else {
+            emptyList()
+        }.ifEmpty { listOf(1) }
 
         var found = false
         for (sid in sourceIndices) {
