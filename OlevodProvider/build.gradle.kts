@@ -1,4 +1,4 @@
-version = 1
+version = 2
 
 cloudstream {
     description = "Olevod - Chinese streaming site - Movies, TV Shows, Anime, Variety"
