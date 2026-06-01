@@ -1,12 +1,13 @@
 package com.example
 
-import android.util.Base64
+import android.util.Log
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonProperty
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import java.net.URLDecoder
 
 class CupfoxProvider : MainAPI() {
     override var mainUrl = "https://cupfox.in"
@@ -30,8 +31,17 @@ class CupfoxProvider : MainAPI() {
         "show" to "综艺",
     )
 
-    // /vod-play/{vodId}-{sourceId}-{epNum}.html
-    private val playHrefRegex = Regex("""/vod-play/(\d+)-(\d+)-(\d+)\.html""")
+    // Intercepted from the site JS: GET /tea/{vodId}-{epSlug} → {video_plays:[{play_data,src_site}]}
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class TeaResponse(
+        @JsonProperty("video_plays") val videoPlays: List<VideoPlay>?
+    )
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    data class VideoPlay(
+        @JsonProperty("play_data") val playData: String?,
+        @JsonProperty("src_site") val srcSite: String?
+    )
 
     private fun parseCards(document: org.jsoup.nodes.Document): List<SearchResponse> {
         val seen = mutableSetOf<String>()
@@ -51,8 +61,10 @@ class CupfoxProvider : MainAPI() {
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
         val url = "$mainUrl/filter/?type=${request.data}&pg=$page"
+        Log.d("CupfoxProvider", "getMainPage url=$url")
         val document = app.get(url, headers = headers).document
         val items = parseCards(document)
+        Log.d("CupfoxProvider", "getMainPage items=${items.size}")
         return newHomePageResponse(
             list = HomePageList(name = request.name, list = items, isHorizontalImages = false),
             hasNext = items.isNotEmpty()
@@ -60,71 +72,52 @@ class CupfoxProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("$mainUrl/search?q=$query", headers = headers).document
+        val url = "$mainUrl/search?q=$query"
+        Log.d("CupfoxProvider", "search url=$url")
+        val document = app.get(url, headers = headers).document
         return parseCards(document)
     }
 
     override suspend fun load(url: String): LoadResponse {
+        Log.d("CupfoxProvider", "load url=$url")
         val document = app.get(url, headers = headers).document
 
-        val title = document.selectFirst("h1")?.text()?.trim()
-            ?: document.title().substringBefore(" - ").trim().ifEmpty {
-                throw ErrorLoadingException("No title found")
+        // Title is in <title>: "{name} 在线观看 - 茶杯狐 Cupfox"
+        val rawTitle = document.title()
+        val title = rawTitle.substringBefore(" 在线观看").substringBefore(" - 茶杯狐").trim()
+            .ifEmpty { throw ErrorLoadingException("No title found at $url") }
+        Log.d("CupfoxProvider", "load title=$title")
+
+        val vodId = Regex("""/vod-detail/(\d+)""").find(url)?.groupValues?.get(1)
+        val posterUrl = fixUrlNull(vodId?.let { "$mainUrl/uimg/$it.jpg" })
+        val plot = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
+
+        // Episode list: <span class="play-btn" ep_slug="ep1">第01集</span>
+        // JS initialises by picking the first play-btn and calling on_ep(ep_slug, text)
+        val playBtns = document.select("span[class*=play-btn]")
+        Log.d("CupfoxProvider", "load playBtns=${playBtns.size}")
+
+        val episodes = playBtns.mapIndexedNotNull { index, el ->
+            val epSlug = el.attr("ep_slug").trim()
+            val epText = el.text().trim().ifEmpty { "第${index + 1}集" }
+            // Sort key: extract number from epSlug (ep8 → 8); fall back to index
+            val epNum = Regex("(\\d+)").find(epSlug)?.groupValues?.get(1)?.toIntOrNull() ?: (index + 1)
+            newEpisode("$vodId:::$epSlug") {
+                this.name = epText
+                this.episode = epNum
             }
-
-        val vodIdFromUrl = Regex("""/vod-detail/(\d+)""").find(url)?.groupValues?.get(1)
-        val posterUrl = fixUrlNull(
-            document.selectFirst("img[src*=/uimg/]")?.attr("src")
-                ?: vodIdFromUrl?.let { "$mainUrl/uimg/$it.jpg" }
-        )
-
-        var year: Int? = null
-        var tags: List<String>? = null
-        var plot: String? = null
-        val actors = mutableListOf<String>()
-
-        document.select("p, li, .info-item").forEach { el ->
-            val text = el.text().trim()
-            when {
-                (text.startsWith("年份") || text.startsWith("年代")) && year == null ->
-                    year = Regex("\\d{4}").find(text)?.value?.toIntOrNull()
-                (text.startsWith("类型") || text.startsWith("分类")) && tags == null ->
-                    tags = el.select("a").map { it.text().trim() }.filter { it.isNotEmpty() }
-                text.startsWith("主演") || text.startsWith("演员") ->
-                    actors.addAll(el.select("a").map { it.text().trim() }.filter { it.isNotEmpty() })
-                (text.startsWith("简介") || text.startsWith("剧情")) && plot == null ->
-                    plot = text.substringAfter("：").substringAfter(":").trim()
-            }
-        }
-
-        // Parse episodes from play links; data = "vodId:::sourceId:::epNum"
-        val episodes = document.select("a[href*=/vod-play/]").mapNotNull { el ->
-            val m = playHrefRegex.find(el.attr("href")) ?: return@mapNotNull null
-            val (vodId, sid, ep) = Triple(m.groupValues[1], m.groupValues[2], m.groupValues[3])
-            val epName = el.text().trim().ifEmpty { "第${ep}集" }
-            newEpisode("$vodId:::$sid:::$ep") {
-                this.name = epName
-                this.episode = ep.toIntOrNull()
-            }
-        }.distinctBy { it.data }
+        }.sortedBy { it.episode ?: Int.MAX_VALUE }
 
         return if (episodes.size <= 1) {
-            val dataStr = episodes.firstOrNull()?.data ?: "$vodIdFromUrl:::1:::1"
+            val dataStr = episodes.firstOrNull()?.data ?: "$vodId:::"
             newMovieLoadResponse(title, url, TvType.Movie, dataStr) {
                 this.posterUrl = posterUrl
-                this.year = year
                 this.plot = plot
-                this.tags = tags
-                this.actors = actors.map { ActorData(Actor(it)) }
             }
         } else {
-            val type = if (tags?.any { it.contains("动漫") } == true) TvType.Anime else TvType.TvSeries
-            newTvSeriesLoadResponse(title, url, type, episodes) {
+            newTvSeriesLoadResponse(title, url, TvType.TvSeries, episodes) {
                 this.posterUrl = posterUrl
-                this.year = year
                 this.plot = plot
-                this.tags = tags
-                this.actors = actors.map { ActorData(Actor(it)) }
             }
         }
     }
@@ -135,67 +128,43 @@ class CupfoxProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // data: "vodId:::sourceId:::epNum"
+        // data: "vodId:::epSlug"  (epSlug may be empty for default version)
         val parts = data.split(":::")
-        if (parts.size < 3) return false
-        val playUrl = "$mainUrl/vod-play/${parts[0]}-${parts[1]}-${parts[2]}.html"
+        val vodId = parts[0].ifEmpty { return false }
+        val epSlug = parts.getOrNull(1) ?: ""
 
-        val html = try {
-            app.get(playUrl, headers = headers).text
-        } catch (_: Exception) {
+        // Intercept the same /tea/ API the page JS calls to resolve video sources
+        val apiUrl = if (epSlug.isNotEmpty()) "$mainUrl/tea/$vodId-$epSlug"
+                     else "$mainUrl/tea/$vodId"
+        Log.d("CupfoxProvider", "loadLinks apiUrl=$apiUrl")
+
+        val response = try {
+            app.get(apiUrl, headers = headers).parsed<TeaResponse>()
+        } catch (e: Exception) {
+            Log.e("CupfoxProvider", "loadLinks fetch failed: ${e.message}")
             return false
         }
 
-        val (videoUrl, flag) = extractPlayerAaaa(html) ?: return false
-        callback.invoke(
-            newExtractorLink(
-                source = name,
-                name = "$name - ${flag.uppercase()}",
-                url = videoUrl,
-                type = if (videoUrl.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
-            ) {
-                this.referer = mainUrl
-                this.quality = Qualities.Unknown.value
-            }
-        )
+        val plays = response.videoPlays
+        Log.d("CupfoxProvider", "loadLinks video_plays=${plays?.size}")
+        if (plays.isNullOrEmpty()) return false
+
+        plays.forEach { play ->
+            val m3u8 = play.playData?.trim() ?: return@forEach
+            if (m3u8.isBlank()) return@forEach
+            val srcName = play.srcSite?.uppercase() ?: "线路"
+            callback.invoke(
+                newExtractorLink(
+                    source = name,
+                    name = "$name - $srcName",
+                    url = m3u8,
+                    type = if (m3u8.contains(".m3u8")) ExtractorLinkType.M3U8 else ExtractorLinkType.VIDEO
+                ) {
+                    this.referer = mainUrl
+                    this.quality = Qualities.Unknown.value
+                }
+            )
+        }
         return true
-    }
-
-    // Intercepts the player_aaaa JS config embedded in the play page HTML.
-    // Returns Pair(videoUrl, flagName) or null if not found.
-    private fun extractPlayerAaaa(html: String): Pair<String, String>? {
-        val markerIdx = html.indexOf("player_aaaa")
-        if (markerIdx == -1) return null
-        val start = html.indexOf('{', markerIdx)
-        if (start == -1) return null
-
-        var depth = 0; var end = -1; var inStr = false; var esc = false
-        for (i in start until html.length) {
-            val c = html[i]
-            if (esc) { esc = false; continue }
-            if (c == '\\' && inStr) { esc = true; continue }
-            if (c == '"') { inStr = !inStr; continue }
-            if (inStr) continue
-            when (c) {
-                '{' -> depth++
-                '}' -> { depth--; if (depth == 0) { end = i; break } }
-            }
-        }
-        if (end == -1) return null
-        val blob = html.substring(start, end + 1)
-
-        val urlMatch = Regex(""""?url"?\s*:\s*"([^"]*)"""").find(blob) ?: return null
-        var url = urlMatch.groupValues[1].replace("\\/", "/").replace("\\u0026", "&")
-
-        val encrypt = Regex(""""?encrypt"?\s*:\s*(\d+)""").find(blob)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-        url = when (encrypt) {
-            1 -> try { String(Base64.decode(url, Base64.DEFAULT)) } catch (_: Exception) { url }
-            2 -> try { URLDecoder.decode(url, "UTF-8") } catch (_: Exception) { url }
-            else -> url
-        }
-        if (url.isBlank()) return null
-
-        val flag = Regex(""""?(?:flag|from)"?\s*:\s*"([^"]+)"""").find(blob)?.groupValues?.get(1) ?: "线路1"
-        return url to flag
     }
 }

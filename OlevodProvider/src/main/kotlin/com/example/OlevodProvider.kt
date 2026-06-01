@@ -1,12 +1,12 @@
 package com.example
 
 import android.util.Base64
+import android.util.Log
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
 import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
-import org.jsoup.nodes.Element
 import java.net.URLDecoder
 
 class OlevodProvider : MainAPI() {
@@ -36,16 +36,39 @@ class OlevodProvider : MainAPI() {
     // /index.php/vod/play/id/{vodId}/sid/{sid}/nid/{nid}.html
     private val playHrefRegex = Regex("""/play/id/(\d+)/sid/(\d+)/nid/(\d+)""")
 
-    private fun Element.toSearchResult(): SearchResponse? {
-        val titleEl = this.selectFirst("h2 a, h4 a") ?: return null
-        val title = titleEl.text().trim().ifEmpty { return null }
-        val href = fixUrl(titleEl.attr("href"))
-        val posterUrl = fixUrlNull(
-            this.selectFirst("a.vod-pic img, img")?.attr("data-src")
-                ?: this.selectFirst("a.vod-pic img, img")?.attr("src")
-        )
-        return newMovieSearchResponse(title, href, TvType.Movie) {
-            this.posterUrl = posterUrl
+    // Listing page cards: <li class="vodlist_item num_N">
+    //   <a class="vodlist_thumb" href="..." title="..." data-original="...jpg">
+    //   <div class="vodlist_titbox"><p class="vodlist_title"><a>title</a>
+    private fun parseCards(document: org.jsoup.nodes.Document): List<SearchResponse> {
+        return document.select("li[class^=vodlist_item]").mapNotNull { li ->
+            val thumbEl = li.selectFirst("a.vodlist_thumb, a[href*=/vod/detail/]") ?: return@mapNotNull null
+            val href = fixUrl(thumbEl.attr("href").ifEmpty { return@mapNotNull null })
+            val title = thumbEl.attr("title").trim()
+                .ifEmpty { li.selectFirst("p.vodlist_title")?.text()?.trim() ?: return@mapNotNull null }
+            val posterUrl = fixUrlNull(
+                thumbEl.attr("data-original").ifEmpty { null }
+                    ?: thumbEl.selectFirst("img")?.attr("src")
+            )
+            newMovieSearchResponse(title, href, TvType.Movie) {
+                this.posterUrl = posterUrl
+            }
+        }
+    }
+
+    // Search results use a different card class: searchlist_item
+    private fun parseSearchCards(document: org.jsoup.nodes.Document): List<SearchResponse> {
+        return document.select("li.searchlist_item").mapNotNull { li ->
+            val href = fixUrl(li.selectFirst("a[href*=/vod/detail/]")?.attr("href") ?: return@mapNotNull null)
+            val title = li.selectFirst("p.vodlist_title")?.text()?.trim()
+                ?: li.selectFirst("a[href*=/vod/detail/]")?.attr("title")?.trim()
+                ?: return@mapNotNull null
+            val posterUrl = fixUrlNull(
+                li.selectFirst("a[data-original]")?.attr("data-original")
+                    ?: li.selectFirst("img")?.attr("src")
+            )
+            newMovieSearchResponse(title, href, TvType.Movie) {
+                this.posterUrl = posterUrl
+            }
         }
     }
 
@@ -56,8 +79,10 @@ class OlevodProvider : MainAPI() {
             val base = request.data.removeSuffix(".html")
             "$mainUrl${base}/page/$page.html"
         }
+        Log.d("OlevodProvider", "getMainPage url=$url")
         val document = app.get(url, headers = headers).document
-        val items = document.select(".vod-item, li.col-md-3, li.col-sm-3").mapNotNull { it.toSearchResult() }
+        val items = parseCards(document)
+        Log.d("OlevodProvider", "getMainPage items=${items.size}")
         return newHomePageResponse(
             list = HomePageList(name = request.name, list = items, isHorizontalImages = false),
             hasNext = items.isNotEmpty()
@@ -65,45 +90,53 @@ class OlevodProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val document = app.get("$mainUrl/index.php/vod/search/wd/$query.html", headers = headers).document
-        return document.select(".vod-item, li.col-md-3, li.col-sm-3").mapNotNull { it.toSearchResult() }
+        val url = "$mainUrl/index.php/vod/search/wd/$query.html"
+        Log.d("OlevodProvider", "search url=$url")
+        val document = app.get(url, headers = headers).document
+        val results = parseSearchCards(document)
+        Log.d("OlevodProvider", "search results=${results.size}")
+        return results
     }
 
     override suspend fun load(url: String): LoadResponse {
+        Log.d("OlevodProvider", "load url=$url")
         val document = app.get(url, headers = headers).document
 
-        val title = document.selectFirst("h1")?.text()?.trim()
-            ?: throw ErrorLoadingException("No title found")
+        // Title is in <title>: "{name}_超清欧乐影院 - 欧乐影院..." or "{name}_..."
+        val rawTitle = document.title()
+        val title = rawTitle.substringBefore("_").substringBefore(" - ").trim()
+            .ifEmpty { throw ErrorLoadingException("No title found at $url") }
+        Log.d("OlevodProvider", "load title=$title")
 
+        // Poster: first image in a[data-original] or img on the detail page
         val posterUrl = fixUrlNull(
-            document.selectFirst(".vod-info img, .detail-pic img")?.attr("data-src")
-                ?: document.selectFirst(".vod-info img, .detail-pic img")?.attr("src")
+            document.selectFirst("a[data-original]")?.attr("data-original")
+                ?: document.selectFirst("img[src*=upload]")?.attr("src")
         )
 
+        // Metadata from list items with span labels
         var year: Int? = null
         var tags: List<String>? = null
         var plot: String? = null
         val actors = mutableListOf<String>()
 
-        document.select(".vod-info p, .detail-info p").forEach { p ->
-            val text = p.text().trim()
+        document.select("li.data, p.data, li, p").forEach { el ->
+            val text = el.text().trim()
             when {
                 (text.contains("年份") || text.contains("年代")) && year == null ->
-                    year = p.selectFirst("a")?.text()?.trim()?.toIntOrNull()
+                    year = el.selectFirst("a")?.text()?.trim()?.toIntOrNull()
                         ?: Regex("\\d{4}").find(text)?.value?.toIntOrNull()
                 (text.contains("类型") || text.contains("分类")) && tags == null ->
-                    tags = p.select("a").map { it.text().trim() }.filter { it.isNotEmpty() }
-                text.contains("主演") || text.contains("演员") ->
-                    actors.addAll(p.select("a").map { it.text().trim() }.filter { it.isNotEmpty() })
+                    tags = el.select("a").map { it.text().trim() }.filter { it.isNotEmpty() }
+                (text.contains("主演") || text.contains("演员")) && actors.isEmpty() ->
+                    actors.addAll(el.select("a").map { it.text().trim() }.filter { it.isNotEmpty() })
                 (text.contains("简介") || text.contains("剧情")) && plot == null ->
-                    plot = text.substringAfter("：").substringAfter(":").trim()
+                    plot = el.selectFirst("span.desc, span.info_right, span")?.text()?.trim()
+                        ?: text.substringAfter("：").substringAfter(":").trim().ifEmpty { null }
             }
         }
-        if (plot.isNullOrBlank()) {
-            plot = document.selectFirst(".vod-desc, .detail-desc")?.text()?.trim()
-        }
 
-        // Parse episodes; data = "vodId:::sid:::nid"
+        // Episode list: a[href*=/vod/play/id/], data = "vodId:::sid:::nid"
         val episodes = document.select("a[href*=/index.php/vod/play/id/]").mapNotNull { el ->
             val m = playHrefRegex.find(el.attr("href")) ?: return@mapNotNull null
             val (vodId, sid, nid) = Triple(m.groupValues[1], m.groupValues[2], m.groupValues[3])
@@ -113,8 +146,7 @@ class OlevodProvider : MainAPI() {
                 this.episode = nid.toIntOrNull()
             }
         }.distinctBy { it.data }
-
-        val recommendations = document.select(".vod-item, li.col-md-3").mapNotNull { it.toSearchResult() }
+        Log.d("OlevodProvider", "load episodes=${episodes.size}")
 
         return if (episodes.size <= 1) {
             val dataStr = episodes.firstOrNull()?.data ?: ""
@@ -123,7 +155,6 @@ class OlevodProvider : MainAPI() {
                 this.year = year
                 this.plot = plot
                 this.tags = tags
-                this.recommendations = recommendations
                 this.actors = actors.map { ActorData(Actor(it)) }
             }
         } else {
@@ -133,7 +164,6 @@ class OlevodProvider : MainAPI() {
                 this.year = year
                 this.plot = plot
                 this.tags = tags
-                this.recommendations = recommendations
                 this.actors = actors.map { ActorData(Actor(it)) }
             }
         }
@@ -147,16 +177,25 @@ class OlevodProvider : MainAPI() {
     ): Boolean {
         // data: "vodId:::sid:::nid"
         val parts = data.split(":::")
-        if (parts.size < 3) return false
+        if (parts.size < 3) {
+            Log.w("OlevodProvider", "loadLinks invalid data: $data")
+            return false
+        }
         val playUrl = "$mainUrl/index.php/vod/play/id/${parts[0]}/sid/${parts[1]}/nid/${parts[2]}.html"
+        Log.d("OlevodProvider", "loadLinks playUrl=$playUrl")
 
         val html = try {
             app.get(playUrl, headers = headers).text
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e("OlevodProvider", "loadLinks fetch failed: ${e.message}")
             return false
         }
 
-        val (videoUrl, flag) = extractPlayerAaaa(html) ?: return false
+        val (videoUrl, flag) = extractPlayerAaaa(html) ?: run {
+            Log.w("OlevodProvider", "loadLinks player_aaaa not found in $playUrl")
+            return false
+        }
+        Log.d("OlevodProvider", "loadLinks videoUrl=$videoUrl flag=$flag")
         callback.invoke(
             newExtractorLink(
                 source = name,
