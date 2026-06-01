@@ -1,4 +1,4 @@
-version = 3
+version = 4
 
 cloudstream {
     description = "茶杯狐 - Chinese streaming site - Movies, TV Shows, Anime, Variety"

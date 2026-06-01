@@ -26,9 +26,13 @@ class IyftvProvider : MainAPI() {
     // api.iyf.tv/api/* returns JSON directly and is the correct endpoint.
     private val apiBase = "https://api.iyf.tv"
 
+    // api.iyf.tv responds with CORS access-control-allow-credentials: true,
+    // meaning it expects browser session cookies. Include Origin + Referer so
+    // the server treats this as a same-site browser request.
     private val headers = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
-        "Accept" to "application/json, text/html, */*",
+        "Accept" to "application/json, text/plain, */*",
+        "Origin" to "https://www.iyf.tv",
         "Referer" to "https://www.iyf.tv/"
     )
 

@@ -10,7 +10,8 @@ import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
 
 class CupfoxProvider : MainAPI() {
-    override var mainUrl = "https://cupfox.in"
+    // Use www to avoid a 301 redirect on every request
+    override var mainUrl = "https://www.cupfox.in"
     override var name = "Cupfox"
     override var lang = "zh"
     override val hasMainPage = true
@@ -31,7 +32,7 @@ class CupfoxProvider : MainAPI() {
         "show" to "综艺",
     )
 
-    // Intercepted from the site JS: GET /tea/{vodId}-{epSlug} → {video_plays:[{play_data,src_site}]}
+    // GET /tea/{vodId}-{epSlug} → {video_plays:[{play_data, src_site}], html_content: "..."}
     @JsonIgnoreProperties(ignoreUnknown = true)
     data class TeaResponse(
         @JsonProperty("video_plays") val videoPlays: List<VideoPlay>?
@@ -46,8 +47,8 @@ class CupfoxProvider : MainAPI() {
     private fun parseCards(document: org.jsoup.nodes.Document): List<SearchResponse> {
         val seen = mutableSetOf<String>()
         val results = mutableListOf<SearchResponse>()
-        // Each card is a div.movie-list-item with an a[href*=/vod-detail/] for the poster
-        // and a div.movie-title for the title — img elements have no alt attribute
+        // Cards: div.movie-list-item → a[href*=/vod-detail/] + div.movie-title
+        // img elements have no alt attribute; title is in div.movie-title
         document.select("div[class*=movie-list-item]").forEach { card ->
             val href = fixUrl(card.selectFirst("a[href*=/vod-detail/]")?.attr("href") ?: return@forEach)
             if (!seen.add(href)) return@forEach
@@ -94,21 +95,28 @@ class CupfoxProvider : MainAPI() {
         val posterUrl = fixUrlNull(vodId?.let { "$mainUrl/uimg/$it.jpg" })
         val plot = document.selectFirst("meta[name=description]")?.attr("content")?.trim()
 
-        // Episode list: <span class="play-btn" ep_slug="ep1">第01集</span>
-        // JS initialises by picking the first play-btn and calling on_ep(ep_slug, text)
-        val playBtns = document.select("span[class*=play-btn]")
-        Log.d("CupfoxProvider", "load playBtns=${playBtns.size}")
-
-        val episodes = playBtns.mapIndexedNotNull { index, el ->
-            val epSlug = el.attr("ep_slug").trim()
-            val epText = el.text().trim().ifEmpty { "第${index + 1}集" }
-            // Sort key: extract number from epSlug (ep8 → 8); fall back to index
-            val epNum = Regex("(\\d+)").find(epSlug)?.groupValues?.get(1)?.toIntOrNull() ?: (index + 1)
-            newEpisode("$vodId:::$epSlug") {
-                this.name = epText
-                this.episode = epNum
+        // Episode buttons: <span class="... play-btn" ep_slug="ep1">第01集</span>
+        // The JS picks the first play-btn span and calls on_ep(ep_slug, text).
+        // Empty ep_slug means "其他版本" (alternate sources for current ep) — not a real episode.
+        // Spans are duplicated for mobile/desktop layout, so we deduplicate by ep_slug.
+        val seenSlugs = mutableSetOf<String>()
+        val episodes = document.select("span[class*=play-btn]")
+            .filter { el ->
+                val slug = el.attr("ep_slug").trim()
+                slug.isNotEmpty() && seenSlugs.add(slug)
             }
-        }.sortedBy { it.episode ?: Int.MAX_VALUE }
+            .mapIndexed { i, el ->
+                val epSlug = el.attr("ep_slug").trim()
+                val epText = el.text().trim().ifEmpty { "第${i + 1}集" }
+                val epNum = Regex("(\\d+)").find(epSlug)?.groupValues?.get(1)?.toIntOrNull() ?: (i + 1)
+                newEpisode("$vodId:::$epSlug") {
+                    this.name = epText
+                    this.episode = epNum
+                }
+            }
+            .sortedBy { it.episode ?: Int.MAX_VALUE }
+
+        Log.d("CupfoxProvider", "load episodes=${episodes.size} vodId=$vodId")
 
         return if (episodes.size <= 1) {
             val dataStr = episodes.firstOrNull()?.data ?: "$vodId:::"
@@ -130,12 +138,12 @@ class CupfoxProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
-        // data: "vodId:::epSlug"  (epSlug may be empty for default version)
+        // data: "vodId:::epSlug"  (epSlug may be empty for legacy data)
         val parts = data.split(":::")
         val vodId = parts[0].ifEmpty { return false }
         val epSlug = parts.getOrNull(1) ?: ""
 
-        // Intercept the same /tea/ API the page JS calls to resolve video sources
+        // The page JS calls GET /tea/{vodId}-{epSlug} (or /tea/{vodId} for default ep)
         val apiUrl = if (epSlug.isNotEmpty()) "$mainUrl/tea/$vodId-$epSlug"
                      else "$mainUrl/tea/$vodId"
         Log.d("CupfoxProvider", "loadLinks apiUrl=$apiUrl")
@@ -151,9 +159,9 @@ class CupfoxProvider : MainAPI() {
         Log.d("CupfoxProvider", "loadLinks video_plays=${plays?.size}")
         if (plays.isNullOrEmpty()) return false
 
+        var found = false
         plays.forEach { play ->
-            val m3u8 = play.playData?.trim() ?: return@forEach
-            if (m3u8.isBlank()) return@forEach
+            val m3u8 = play.playData?.trim()?.takeIf { it.isNotBlank() } ?: return@forEach
             val srcName = play.srcSite?.uppercase() ?: "线路"
             callback.invoke(
                 newExtractorLink(
@@ -166,7 +174,8 @@ class CupfoxProvider : MainAPI() {
                     this.quality = Qualities.Unknown.value
                 }
             )
+            found = true
         }
-        return true
+        return found
     }
 }

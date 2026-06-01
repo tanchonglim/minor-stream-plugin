@@ -1,4 +1,4 @@
-version = 3
+version = 4
 
 cloudstream {
     description = "爱壹帆 - Chinese streaming site - Movies, TV Shows, Variety"
