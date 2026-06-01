@@ -46,12 +46,14 @@ class CupfoxProvider : MainAPI() {
     private fun parseCards(document: org.jsoup.nodes.Document): List<SearchResponse> {
         val seen = mutableSetOf<String>()
         val results = mutableListOf<SearchResponse>()
-        document.select("a[href*=/vod-detail/]").forEach { el ->
-            val href = fixUrl(el.attr("href"))
+        // Each card is a div.movie-list-item with an a[href*=/vod-detail/] for the poster
+        // and a div.movie-title for the title — img elements have no alt attribute
+        document.select("div[class*=movie-list-item]").forEach { card ->
+            val href = fixUrl(card.selectFirst("a[href*=/vod-detail/]")?.attr("href") ?: return@forEach)
             if (!seen.add(href)) return@forEach
-            val imgEl = el.selectFirst("img") ?: return@forEach
-            val title = imgEl.attr("alt").trim().ifEmpty { return@forEach }
-            val posterUrl = fixUrlNull(imgEl.attr("src").ifEmpty { null })
+            val title = card.selectFirst("div[class*=movie-title]")?.text()?.trim()
+                ?.takeIf { it.isNotEmpty() } ?: return@forEach
+            val posterUrl = fixUrlNull(card.selectFirst("img")?.attr("src")?.takeIf { it.isNotEmpty() })
             results.add(newMovieSearchResponse(title, href, TvType.Movie) {
                 this.posterUrl = posterUrl
             })

@@ -11,10 +11,6 @@ import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import java.net.URLDecoder
 
-// NOTE: iyf.tv serves its SPA shell for all API paths when accessed without
-// authentication tokens. Content loads fine in a real browser session.
-// The API endpoints below are those the browser JS calls; they require
-// a valid session to return JSON instead of HTML.
 class IyftvProvider : MainAPI() {
     override var mainUrl = "https://www.iyf.tv"
     override var name = "IyfTV"
@@ -25,6 +21,10 @@ class IyftvProvider : MainAPI() {
         TvType.TvSeries,
         TvType.Anime
     )
+
+    // www.iyf.tv/api/* 302-redirects to m.iyf.tv which serves the SPA shell (HTML).
+    // api.iyf.tv/api/* returns JSON directly and is the correct endpoint.
+    private val apiBase = "https://api.iyf.tv"
 
     private val headers = mapOf(
         "User-Agent" to "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36",
@@ -101,16 +101,17 @@ class IyftvProvider : MainAPI() {
         text.trimStart().startsWith("<html", ignoreCase = true)
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
-        val apiUrl = "$mainUrl/api/getMovieList?typeId=${request.data}&page=$page&size=20"
+        val apiUrl = "$apiBase/api/getMovieList?typeId=${request.data}&page=$page&size=20"
         Log.d("IyftvProvider", "getMainPage apiUrl=$apiUrl")
         val items = try {
-            val text = app.get(apiUrl, headers = headers).text
+            val response = app.get(apiUrl, headers = headers)
+            val text = response.text
             Log.d("IyftvProvider", "getMainPage response length=${text.length} isHtml=${isHtmlResponse(text)}")
             if (isHtmlResponse(text)) {
                 Log.w("IyftvProvider", "getMainPage: API returned HTML (auth required)")
                 emptyList()
             } else {
-                val parsed = app.get(apiUrl, headers = headers).parsed<ListResponse>()
+                val parsed = response.parsed<ListResponse>()
                 parsed.data?.list?.mapNotNull { item ->
                     val id = item.getId().ifEmpty { return@mapNotNull null }
                     val title = item.getTitle().ifEmpty { return@mapNotNull null }
@@ -131,16 +132,17 @@ class IyftvProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
-        val apiUrl = "$mainUrl/api/search?wd=$query&page=1"
+        val apiUrl = "$apiBase/api/search?wd=$query&page=1"
         Log.d("IyftvProvider", "search apiUrl=$apiUrl")
         return try {
-            val text = app.get(apiUrl, headers = headers).text
+            val response = app.get(apiUrl, headers = headers)
+            val text = response.text
             Log.d("IyftvProvider", "search response length=${text.length} isHtml=${isHtmlResponse(text)}")
             if (isHtmlResponse(text)) {
                 Log.w("IyftvProvider", "search: API returned HTML (auth required)")
                 emptyList()
             } else {
-                val parsed = app.get(apiUrl, headers = headers).parsed<ListResponse>()
+                val parsed = response.parsed<ListResponse>()
                 parsed.data?.list?.mapNotNull { item ->
                     val id = item.getId().ifEmpty { return@mapNotNull null }
                     val title = item.getTitle().ifEmpty { return@mapNotNull null }
@@ -161,19 +163,20 @@ class IyftvProvider : MainAPI() {
             ?: Regex("/(\\d+)(?:[/?]|\$)").find(url)?.groupValues?.get(1)
             ?: throw ErrorLoadingException("Cannot extract VOD ID from URL: $url")
 
-        val apiUrl = "$mainUrl/api/getMovieDetail?id=$vodId"
+        val apiUrl = "$apiBase/api/getMovieDetail?id=$vodId"
         Log.d("IyftvProvider", "load detailApiUrl=$apiUrl")
 
-        val text = try { app.get(apiUrl, headers = headers).text }
-                   catch (e: Exception) { throw ErrorLoadingException("Failed to fetch detail: ${e.message}") }
+        val detailResponse = try { app.get(apiUrl, headers = headers) }
+                             catch (e: Exception) { throw ErrorLoadingException("Failed to fetch detail: ${e.message}") }
+        val text = detailResponse.text
 
         Log.d("IyftvProvider", "load detail response length=${text.length} isHtml=${isHtmlResponse(text)}")
         if (isHtmlResponse(text)) {
-            Log.w("IyftvProvider", "load: API returned HTML (auth required) for vodId=$vodId")
+            Log.w("IyftvProvider", "load: API returned HTML for vodId=$vodId")
             throw ErrorLoadingException("IyfTV API requires authentication. Please log in via the app.")
         }
 
-        val detail = app.get(apiUrl, headers = headers).parsed<DetailResponse>()
+        val detail = detailResponse.parsed<DetailResponse>()
         val info = detail.data?.info ?: throw ErrorLoadingException("No info for ID: $vodId")
         val title = info.getTitle().ifEmpty { throw ErrorLoadingException("No title for ID: $vodId") }
         val posterUrl = info.getPoster()
@@ -213,14 +216,15 @@ class IyftvProvider : MainAPI() {
         val epId = parts.getOrNull(1) ?: "1"
 
         // Intercept the same API the browser JS calls to resolve the video URL
-        val apiUrl = "$mainUrl/api/getPlayInfo?id=$vodId&nid=$epId"
+        val apiUrl = "$apiBase/api/getPlayInfo?id=$vodId&nid=$epId"
         Log.d("IyftvProvider", "loadLinks apiUrl=$apiUrl")
 
-        val text = try { app.get(apiUrl, headers = headers).text }
-                   catch (e: Exception) {
-                       Log.e("IyftvProvider", "loadLinks fetch failed: ${e.message}")
-                       return false
-                   }
+        val linkResponse = try { app.get(apiUrl, headers = headers) }
+                           catch (e: Exception) {
+                               Log.e("IyftvProvider", "loadLinks fetch failed: ${e.message}")
+                               return false
+                           }
+        val text = linkResponse.text
 
         Log.d("IyftvProvider", "loadLinks response length=${text.length} isHtml=${isHtmlResponse(text)}")
         if (isHtmlResponse(text)) {
@@ -229,7 +233,7 @@ class IyftvProvider : MainAPI() {
         }
 
         val playInfo = try {
-            app.get(apiUrl, headers = headers).parsed<PlayInfoResponse>()
+            linkResponse.parsed<PlayInfoResponse>()
         } catch (e: Exception) {
             Log.e("IyftvProvider", "loadLinks parse failed: ${e.message}")
             return false
