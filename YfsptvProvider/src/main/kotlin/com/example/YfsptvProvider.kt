@@ -25,12 +25,11 @@ class YfsptvProvider : MainAPI() {
     companion object {
         private const val TAG = "YfsptvProvider"
 
-        // Fallback keys extracted from yfsp.tv/list (refreshed automatically on first call)
-        internal const val FALLBACK_PUB_KEY  = "CJSuC3GmCp4uDoutDJ9VKqTVCZ0tBZGsBZ8oD2uuD5yQc1ko6pARcXaOCJCQ6x4Pd9cP71gochAQc9oPcZ8QcQzCJKmC3TZEJXaOJbYDZ8rCZCqE3GuDZGpC38sDp0sOM3"
-        internal const val FALLBACK_PRIV_KEY = "SuC3JSuC3GmCp4uDoutD"
+        // Long-lived fallback pub key; private key is derived via derivePrivKey().
+        // The live page serves short-lived session keys — this permanent key is used on retry.
+        internal const val FALLBACK_PUB_KEY = "CJSuC3GmCp4uDoutDJ9VKqTVCZ0tBZGsBZ8oD2uuD5yQc1ko6pARcXaOCJCQ6x4Pd9cP71gochAQc9oPcZ8QcQzCJKmC3TZEJXaOJbYDZ8rCZCqE3GuDZGpC38sDp0sOM3"
 
-        @Volatile private var cachedPub:  String? = null
-        @Volatile private var cachedPriv: String? = null
+        @Volatile private var cachedPub: String? = null
     }
 
     override val mainPage = mainPageOf(
@@ -43,31 +42,44 @@ class YfsptvProvider : MainAPI() {
 
     // ── pConfig ─────────────────────────────────────────────────────────────
 
-    /** Fetches publicKey + privateKey[0] from the HTML page's inline pConfig JSON. */
+    /**
+     * Derives the private key from the public key using the site's fixed formula:
+     *   privKey = "SuC3JSuC3Gm" + pubKey[8..16]
+     */
+    private fun derivePrivKey(pub: String): String = "SuC3JSuC3Gm" + pub.substring(8, 17)
+
+    /** Fetches publicKey from the HTML page's inline pConfig JSON. Private key is derived. */
     private suspend fun getPConfig(): Pair<String, String> {
-        Log.d(TAG, "getPConfig START cacheHit=${cachedPub != null && cachedPriv != null}")
-        cachedPub?.let { pub -> cachedPriv?.let { priv ->
+        Log.d(TAG, "getPConfig START cacheHit=${cachedPub != null}")
+        cachedPub?.let { pub ->
+            val priv = derivePrivKey(pub)
             Log.d(TAG, "getPConfig CACHE HIT pub=${pub.take(20)}…")
             return pub to priv
-        }}
+        }
         return try {
             Log.d(TAG, "getPConfig fetching $mainUrl/list")
             val html = app.get("$mainUrl/list", interceptor = cfKiller).text
             Log.d(TAG, "getPConfig html length=${html.length}")
-            val pub  = Regex(""""publicKey"\s*:\s*"([^"]+)"""").find(html)?.groupValues?.get(1)
-            val priv = Regex(""""privateKey"\s*:\s*\["([^"]+)"\]""").find(html)?.groupValues?.get(1)
-            if (pub != null && priv != null) {
+            val pub = Regex(""""publicKey"\s*:\s*"([^"]+)"""").find(html)?.groupValues?.get(1)
+            if (pub != null && pub.length >= 17) {
+                val priv = derivePrivKey(pub)
                 Log.d(TAG, "getPConfig OK pub=${pub.take(20)}… priv=${priv.take(10)}…")
-                cachedPub = pub; cachedPriv = priv
+                cachedPub = pub
                 pub to priv
             } else {
-                Log.w(TAG, "getPConfig keys not found in HTML (pubFound=${pub != null} privFound=${priv != null}), using fallback")
-                FALLBACK_PUB_KEY to FALLBACK_PRIV_KEY
+                Log.w(TAG, "getPConfig publicKey not found or too short (pub=${pub?.take(20)}), using fallback")
+                FALLBACK_PUB_KEY to derivePrivKey(FALLBACK_PUB_KEY)
             }
         } catch (e: Exception) {
             Log.e(TAG, "getPConfig EXCEPTION ${e.javaClass.simpleName}: ${e.message}, using fallback")
-            FALLBACK_PUB_KEY to FALLBACK_PRIV_KEY
+            FALLBACK_PUB_KEY to derivePrivKey(FALLBACK_PUB_KEY)
         }
+    }
+
+    /** Clears the cached public key, forcing a fresh fetch on the next getPConfig call. */
+    private fun invalidateKeyCache() {
+        Log.d(TAG, "invalidateKeyCache: clearing cachedPub")
+        cachedPub = null
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
@@ -105,7 +117,15 @@ class YfsptvProvider : MainAPI() {
         )
         val url = buildYfsUrl("$apiBase/api/list/index", params, pub, priv)
         Log.d(TAG, "getMainPage requestUrl=$url")
-        val resp = app.get(url, interceptor = cfKiller).parsed<YfspApiResponse<YfspListItem>>()
+        var resp = app.get(url).parsed<YfspApiResponse<YfspListItem>>()
+        if (resp.data?.code == 1) {
+            // Signature rejected — cached key stale; retry once with fresh key.
+            Log.w(TAG, "getMainPage code=1 on first attempt; invalidating key cache and retrying")
+            invalidateKeyCache()
+            val (pub2, priv2) = getPConfig()
+            val url2 = buildYfsUrl("$apiBase/api/list/index", params, pub2, priv2)
+            resp = app.get(url2).parsed()
+        }
         Log.d(TAG, "getMainPage apiCode=${resp.data?.code} rawInfoSize=${resp.data?.info?.size}")
         val items = resp.data?.info?.mapNotNull { listItemToSearch(it) } ?: emptyList()
         Log.d(TAG, "getMainPage END page=$page items=${items.size} hasNext=${items.isNotEmpty()}")
@@ -138,7 +158,7 @@ class YfsptvProvider : MainAPI() {
         val urlParams = rawParams + mapOf("tags" to URLEncoder.encode(query, "UTF-8"))
         val url = buildYfsUrl("$rankBase/v3/list/briefsearch", rawParams, pub, priv, urlParams)
         Log.d(TAG, "search requestUrl=$url")
-        val resp = app.get(url, interceptor = cfKiller).parsed<YfspApiResponse<YfspBriefSearchInfo>>()
+        val resp = app.get(url).parsed<YfspApiResponse<YfspBriefSearchInfo>>()
         Log.d(TAG, "search apiCode=${resp.data?.code} briefInfoSize=${resp.data?.info?.size}")
         val results = resp.data?.info?.firstOrNull()?.result ?: emptyList()
         Log.d(TAG, "search rawResults=${results.size}")
@@ -179,7 +199,7 @@ class YfsptvProvider : MainAPI() {
         )
         val detailApiUrl = buildYfsUrl("$apiBase/v3/video/detail", detailParams, pub, priv)
         Log.d(TAG, "load detailApiUrl=$detailApiUrl")
-        val detailResp = app.get(detailApiUrl, interceptor = cfKiller).parsed<YfspApiResponse<YfspDetail>>()
+        val detailResp = app.get(detailApiUrl).parsed<YfspApiResponse<YfspDetail>>()
         Log.d(TAG, "load detailApiCode=${detailResp.data?.code} infoSize=${detailResp.data?.info?.size}")
         val detail = detailResp.data?.info?.firstOrNull()
             ?: throw ErrorLoadingException("No detail for key=$key").also {
@@ -205,7 +225,7 @@ class YfsptvProvider : MainAPI() {
         )
         val playApiUrl = buildYfsUrl("$apiBase/v3/video/play", playParams, pub, priv)
         Log.d(TAG, "load playApiUrl=$playApiUrl")
-        val playResp = runCatching { app.get(playApiUrl, interceptor = cfKiller).parsed<YfspApiResponse<YfspPlayInfo>>() }
+        val playResp = runCatching { app.get(playApiUrl).parsed<YfspApiResponse<YfspPlayInfo>>() }
             .onFailure { Log.e(TAG, "load play request EXCEPTION ${it.javaClass.simpleName}: ${it.message}") }
             .getOrNull()
         val playInfo = playResp?.data?.info?.firstOrNull()
@@ -252,7 +272,7 @@ class YfsptvProvider : MainAPI() {
             val nextApiUrl = buildYfsUrl("$apiBase/v3/video/getnextvideo", nextParams, pub, priv)
             Log.d(TAG, "load getnextvideo[${episodes.size}] url=$nextApiUrl")
             val nextEp = runCatching {
-                app.get(nextApiUrl, interceptor = cfKiller).parsed<YfspApiResponse<YfspNextEp>>().data?.info?.firstOrNull()
+                app.get(nextApiUrl).parsed<YfspApiResponse<YfspNextEp>>().data?.info?.firstOrNull()
             }.onFailure {
                 Log.e(TAG, "load getnextvideo EXCEPTION ${it.javaClass.simpleName}: ${it.message}, stopping chain")
             }.getOrNull() ?: break
@@ -300,7 +320,7 @@ class YfsptvProvider : MainAPI() {
         val masterUrl = "$uploadBase/api/video/MasterPlayList?id=$episodeId"
         Log.d(TAG, "loadLinks masterUrl=$masterUrl")
 
-        val m3u8Body = runCatching { app.get(masterUrl, interceptor = cfKiller).text }
+        val m3u8Body = runCatching { app.get(masterUrl).text }
             .onFailure { Log.e(TAG, "loadLinks MasterPlayList EXCEPTION ${it.javaClass.simpleName}: ${it.message}") }
             .getOrNull() ?: run {
                 Log.w(TAG, "loadLinks FAIL: could not fetch MasterPlayList for episodeId=$episodeId")

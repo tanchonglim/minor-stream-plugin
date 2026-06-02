@@ -21,7 +21,7 @@ import org.json.JSONObject
 class YfsptvProviderTest {
 
     private val pub  = YfsptvProvider.FALLBACK_PUB_KEY
-    private val priv = YfsptvProvider.FALLBACK_PRIV_KEY
+    private val priv = "SuC3JSuC3Gm" + pub.substring(8, 17)
 
     private fun signedUrl(base: String, params: Map<String, String>, urlParams: Map<String, String> = params): String =
         buildYfsUrl(base, params, pub, priv, urlParams)
