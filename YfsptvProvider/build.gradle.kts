@@ -1,4 +1,4 @@
-version = 2
+version = 3
 
 cloudstream {
     description = "爱壹帆 (yfsp.tv) - Chinese streaming site - Movies, TV, Variety, Anime"
