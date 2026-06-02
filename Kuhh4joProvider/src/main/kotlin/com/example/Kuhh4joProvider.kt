@@ -24,11 +24,14 @@ class Kuhh4joProvider : MainAPI() {
 
     private val apiBase = "$mainUrl/mw-movie"
 
-    // Signing constants extracted from the site's JS bundle (chunk 2844)
-    // signKey is from: signKey:"cb808529bae6b6be45ecfab29a4889bc" in the axios interceptor
-    private val SIGN_KEY = "cb808529bae6b6be45ecfab29a4889bc"
+    // Fallback sign key extracted from JS bundle (chunk 5055, axios interceptor).
+    // getSignKey() tries to fetch the live value on first use.
+    companion object {
+        private const val FALLBACK_SIGN_KEY = "cb808529bae6b6be45ecfab29a4889bc"
+        @Volatile private var cachedSignKey: String? = null
+    }
 
-    // deviceId is a UUID stored in localStorage; a fixed one works for anonymous calls
+    // Fixed UUID — arbitrary for anonymous API access (mirrors localStorage value)
     private val deviceId = "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"
 
     override val mainPage = mainPageOf(
@@ -40,25 +43,53 @@ class Kuhh4joProvider : MainAPI() {
     )
 
     // --- Signing (reverse-engineered from JS chunk 2844, module 49858) ---
-    // Algorithm: sign = SHA1( MD5( sortedParams + "&key=" + signKey + "&t=" + timestamp ) )
-    // where sortedParams = "k1=v1&k2=v2&..." sorted alphabetically by key
+    // Algorithm: sign = SHA1( MD5( sortedParams + "&key=" + signKey + "&t=" + timestamp_ms ) )
 
     private fun md5(input: String): String {
         val bytes = MessageDigest.getInstance("MD5").digest(input.toByteArray(Charsets.UTF_8))
-        return bytes.joinToString("") { "%02x".format(it) }
+        return bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
     }
 
     private fun sha1(input: String): String {
         val bytes = MessageDigest.getInstance("SHA-1").digest(input.toByteArray(Charsets.UTF_8))
-        return bytes.joinToString("") { "%02x".format(it) }
+        return bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
     }
 
-    private fun makeSignHeaders(params: Map<String, Any>): Map<String, String> {
+    // Dynamically fetch the signing key from the site's JS bundle.
+    // Falls back to FALLBACK_SIGN_KEY on any error.
+    private suspend fun getSignKey(): String {
+        cachedSignKey?.let { return it }
+        return try {
+            val html = app.get(mainUrl).text
+            val chunkUrls = Regex("""/_next/static/chunks/[^\s"'<>]+\.js""")
+                .findAll(html)
+                .map { "$mainUrl${it.value}" }
+                .distinct()
+                .toList()
+            var result = FALLBACK_SIGN_KEY
+            for (url in chunkUrls) {
+                val js = runCatching { app.get(url).text }.getOrNull() ?: continue
+                val key = Regex("""signKey\s*:\s*"([0-9a-f]{32})"""")
+                    .find(js)?.groupValues?.get(1)
+                if (key != null) {
+                    Log.d("Kuhh4joProvider", "Fetched live signKey from $url")
+                    result = key
+                    break
+                }
+            }
+            result.also { cachedSignKey = it }
+        } catch (e: Exception) {
+            Log.w("Kuhh4joProvider", "getSignKey failed, using fallback: ${e.message}")
+            FALLBACK_SIGN_KEY
+        }
+    }
+
+    private fun makeSignHeaders(params: Map<String, Any>, signKey: String): Map<String, String> {
         val timestamp = System.currentTimeMillis()
         val dataStr = params.entries.sortedBy { it.key }
             .joinToString("&") { "${it.key}=${it.value}" }
-        val h = if (dataStr.isNotEmpty()) "$dataStr&key=$SIGN_KEY&t=$timestamp"
-                else "key=$SIGN_KEY&t=$timestamp"
+        val h = if (dataStr.isNotEmpty()) "$dataStr&key=$signKey&t=$timestamp"
+                else "key=$signKey&t=$timestamp"
         val sign = sha1(md5(h))
         return mapOf(
             "sign" to sign,
@@ -118,7 +149,8 @@ class Kuhh4joProvider : MainAPI() {
         @JsonProperty("vodDirector") val vodDirector: String?,
         @JsonProperty("vodClass") val vodClass: String?,
         @JsonProperty("vodArea") val vodArea: String?,
-        @JsonProperty("vodYear") val vodYear: Int?,
+        // API returns String (e.g. "" or "2024"), not Int
+        @JsonProperty("vodYear") val vodYear: String?,
         @JsonProperty("typeId1") val typeId1: Int?,
         @JsonProperty("episodeList") val episodeList: List<EpisodeItem>?,
     )
@@ -174,11 +206,12 @@ class Kuhh4joProvider : MainAPI() {
     // --- MainAPI overrides ---
 
     override suspend fun getMainPage(page: Int, request: MainPageRequest): HomePageResponse {
+        val signKey = getSignKey()
         val type1 = request.data.toInt()
         val params = mapOf("pageNum" to page, "pageSize" to 20, "type1" to type1)
         Log.d("Kuhh4joProvider", "getMainPage type1=$type1 page=$page")
         val url = buildUrl("/anonymous/video/list", params)
-        val data = app.get(url, headers = makeSignHeaders(params)).parsed<ListApiResponse>()
+        val data = app.get(url, headers = makeSignHeaders(params, signKey)).parsed<ListApiResponse>()
         val items = data.data?.list?.mapNotNull { toSearchResponse(it) } ?: emptyList()
         Log.d("Kuhh4joProvider", "getMainPage items=${items.size} total=${data.data?.totalCount}")
         return newHomePageResponse(
@@ -188,10 +221,11 @@ class Kuhh4joProvider : MainAPI() {
     }
 
     override suspend fun search(query: String): List<SearchResponse> {
+        val signKey = getSignKey()
         val params = mapOf("keyword" to query, "pageNum" to 1, "pageSize" to 20)
         Log.d("Kuhh4joProvider", "search query=$query")
         val url = buildUrl("/anonymous/video/searchByWordPageable", params)
-        val data = app.get(url, headers = makeSignHeaders(params)).parsed<ListApiResponse>()
+        val data = app.get(url, headers = makeSignHeaders(params, signKey)).parsed<ListApiResponse>()
         val items = data.data?.list?.mapNotNull { toSearchResponse(it) } ?: emptyList()
         Log.d("Kuhh4joProvider", "search results=${items.size}")
         return items
@@ -202,9 +236,10 @@ class Kuhh4joProvider : MainAPI() {
             ?.toIntOrNull() ?: throw ErrorLoadingException("Invalid URL: $url")
         Log.d("Kuhh4joProvider", "load vodId=$vodId url=$url")
 
+        val signKey = getSignKey()
         val params = mapOf("id" to vodId)
         val apiUrl = buildUrl("/anonymous/video/detail", params)
-        val resp = app.get(apiUrl, headers = makeSignHeaders(params)).parsed<DetailApiResponse>()
+        val resp = app.get(apiUrl, headers = makeSignHeaders(params, signKey)).parsed<DetailApiResponse>()
         val detail = resp.data ?: throw ErrorLoadingException("No detail for vodId=$vodId")
 
         val title = detail.vodName?.trim()?.takeIf { it.isNotEmpty() }
@@ -215,6 +250,7 @@ class Kuhh4joProvider : MainAPI() {
         val actors = detail.vodActor?.split(",")
             ?.map { it.trim() }?.filter { it.isNotEmpty() }
             ?.map { ActorData(Actor(it)) }
+        val year = detail.vodYear?.trim()?.takeIf { it.isNotEmpty() }?.toIntOrNull()
 
         val episodes = detail.episodeList
             ?.sortedWith(compareBy({ it.sort ?: Int.MAX_VALUE }, { it.nid ?: Long.MAX_VALUE }))
@@ -237,7 +273,7 @@ class Kuhh4joProvider : MainAPI() {
                 this.plot = plot
                 this.tags = tags
                 this.actors = actors
-                this.year = detail.vodYear
+                this.year = year
             }
         } else {
             newTvSeriesLoadResponse(title, url, tvType, episodes) {
@@ -245,7 +281,7 @@ class Kuhh4joProvider : MainAPI() {
                 this.plot = plot
                 this.tags = tags
                 this.actors = actors
-                this.year = detail.vodYear
+                this.year = year
             }
         }
     }
@@ -262,28 +298,46 @@ class Kuhh4joProvider : MainAPI() {
             Log.w("Kuhh4joProvider", "loadLinks invalid data: $data")
             return false
         }
-        val vodId = parts[0].toIntOrNull() ?: return false
-        val nid = parts[1].toLongOrNull() ?: return false
+        val vodId = parts[0].toIntOrNull() ?: run {
+            Log.w("Kuhh4joProvider", "loadLinks: invalid vodId in data=$data")
+            return false
+        }
+        val nid = parts[1].toLongOrNull() ?: run {
+            Log.w("Kuhh4joProvider", "loadLinks: invalid nid in data=$data")
+            return false
+        }
 
+        val signKey = getSignKey()
         val params = mapOf("clientType" to 1, "id" to vodId, "nid" to nid)
         val url = buildUrl("/anonymous/v2/video/episode/url", params)
         Log.d("Kuhh4joProvider", "loadLinks vodId=$vodId nid=$nid url=$url")
 
         val resp = try {
-            app.get(url, headers = makeSignHeaders(params)).parsed<PlayApiResponse>()
+            app.get(url, headers = makeSignHeaders(params, signKey)).parsed<PlayApiResponse>()
         } catch (e: Exception) {
             Log.e("Kuhh4joProvider", "loadLinks fetch failed: ${e.message}")
             return false
         }
 
+        Log.d("Kuhh4joProvider", "loadLinks resp.code=${resp.code} list=${resp.data?.list?.size}")
+        if (resp.code != null && resp.code != 200) {
+            Log.w("Kuhh4joProvider", "loadLinks API error code=${resp.code}")
+            // Sign key may have rotated — clear cache so next call re-fetches it
+            cachedSignKey = null
+            return false
+        }
+
         val plays = resp.data?.list
-        Log.d("Kuhh4joProvider", "loadLinks plays=${plays?.size}")
-        if (plays.isNullOrEmpty()) return false
+        if (plays.isNullOrEmpty()) {
+            Log.w("Kuhh4joProvider", "loadLinks no play items returned")
+            return false
+        }
 
         var found = false
         plays.forEach { play ->
             val m3u8 = play.url?.trim()?.takeIf { it.isNotBlank() } ?: return@forEach
             val qualityName = play.resolutionName ?: "线路"
+            Log.d("Kuhh4joProvider", "loadLinks adding link: $qualityName needLogin=${play.needLogin}")
             callback.invoke(
                 newExtractorLink(
                     source = name,
