@@ -19,7 +19,11 @@
       "mcp__playwright__browser_network_requests",
       "mcp__playwright__browser_type",
       "mcp__playwright__browser_close",
-      "Bash(./gradlew DubokuProvider:make:*)"
+      "Bash(./gradlew DubokuProvider:make:*)",
+      "Bash(git add *)",
+      "Bash(git check-ignore *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)"
     ]
   }
 }
