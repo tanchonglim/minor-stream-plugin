@@ -11,3 +11,17 @@
 local.properties
 .vscode
 android-sdk/
+
+# Extracted Android/Gradle dependency JARs unpacked at repo root
+META-INF/
+androidx/
+app/
+coil3/
+com/
+go/
+io/
+okhttp/
+org/
+
+# Local Claude Code session settings (machine-specific permissions)
+.claude/settings.local.json
