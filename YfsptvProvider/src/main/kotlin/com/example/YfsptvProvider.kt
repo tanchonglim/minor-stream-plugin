@@ -82,6 +82,25 @@ class YfsptvProvider : MainAPI() {
         cachedPub = null
     }
 
+    /**
+     * Wraps app.get() with response diagnostics.
+     * Logs HTTP status, CF-Ray header, and a body preview so Cloudflare blocks
+     * are immediately visible in logcat even when JSON parsing succeeds on bad data.
+     * Uses .also{} so the return type is inferred from app.get() and parsed<T>() stays available.
+     */
+    private suspend fun apiGet(url: String) = app.get(url).also { r ->
+        val status = r.code
+        val cfRay  = r.headers["CF-Ray"]
+        val body   = r.text   // NiceResponse caches this; parsed<T>() reuses the cached string
+        val isHtml = body.trimStart().startsWith("<")
+        val hasCf  = cfRay != null || body.contains("cloudflare", ignoreCase = true)
+        if (status != 200 || isHtml || hasCf) {
+            Log.w(TAG, "apiGet CF/BLOCK? status=$status cfRay=$cfRay isHtml=$isHtml url=${url.take(80)} body=${body.take(200)}")
+        } else {
+            Log.d(TAG, "apiGet OK status=$status cfRay=$cfRay url=${url.take(80)} body=${body.take(80)}")
+        }
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────────────
 
     private fun atypeToTvType(atypeName: String?, videoClassID: String?): TvType {
@@ -117,14 +136,14 @@ class YfsptvProvider : MainAPI() {
         )
         val url = buildYfsUrl("$apiBase/api/list/index", params, pub, priv)
         Log.d(TAG, "getMainPage requestUrl=$url")
-        var resp = app.get(url).parsed<YfspApiResponse<YfspListItem>>()
+        var resp = apiGet(url).parsed<YfspApiResponse<YfspListItem>>()
         if (resp.data?.code == 1) {
             // Signature rejected — cached key stale; retry once with fresh key.
             Log.w(TAG, "getMainPage code=1 on first attempt; invalidating key cache and retrying")
             invalidateKeyCache()
             val (pub2, priv2) = getPConfig()
             val url2 = buildYfsUrl("$apiBase/api/list/index", params, pub2, priv2)
-            resp = app.get(url2).parsed()
+            resp = apiGet(url2).parsed()
         }
         Log.d(TAG, "getMainPage apiCode=${resp.data?.code} rawInfoSize=${resp.data?.info?.size}")
         val items = resp.data?.info?.mapNotNull { listItemToSearch(it) } ?: emptyList()
@@ -158,7 +177,7 @@ class YfsptvProvider : MainAPI() {
         val urlParams = rawParams + mapOf("tags" to URLEncoder.encode(query, "UTF-8"))
         val url = buildYfsUrl("$rankBase/v3/list/briefsearch", rawParams, pub, priv, urlParams)
         Log.d(TAG, "search requestUrl=$url")
-        val resp = app.get(url).parsed<YfspApiResponse<YfspBriefSearchInfo>>()
+        val resp = apiGet(url).parsed<YfspApiResponse<YfspBriefSearchInfo>>()
         Log.d(TAG, "search apiCode=${resp.data?.code} briefInfoSize=${resp.data?.info?.size}")
         val results = resp.data?.info?.firstOrNull()?.result ?: emptyList()
         Log.d(TAG, "search rawResults=${results.size}")
@@ -199,7 +218,7 @@ class YfsptvProvider : MainAPI() {
         )
         val detailApiUrl = buildYfsUrl("$apiBase/v3/video/detail", detailParams, pub, priv)
         Log.d(TAG, "load detailApiUrl=$detailApiUrl")
-        val detailResp = app.get(detailApiUrl).parsed<YfspApiResponse<YfspDetail>>()
+        val detailResp = apiGet(detailApiUrl).parsed<YfspApiResponse<YfspDetail>>()
         Log.d(TAG, "load detailApiCode=${detailResp.data?.code} infoSize=${detailResp.data?.info?.size}")
         val detail = detailResp.data?.info?.firstOrNull()
             ?: throw ErrorLoadingException("No detail for key=$key").also {
@@ -225,7 +244,7 @@ class YfsptvProvider : MainAPI() {
         )
         val playApiUrl = buildYfsUrl("$apiBase/v3/video/play", playParams, pub, priv)
         Log.d(TAG, "load playApiUrl=$playApiUrl")
-        val playResp = runCatching { app.get(playApiUrl).parsed<YfspApiResponse<YfspPlayInfo>>() }
+        val playResp = runCatching { apiGet(playApiUrl).parsed<YfspApiResponse<YfspPlayInfo>>() }
             .onFailure { Log.e(TAG, "load play request EXCEPTION ${it.javaClass.simpleName}: ${it.message}") }
             .getOrNull()
         val playInfo = playResp?.data?.info?.firstOrNull()
@@ -272,7 +291,7 @@ class YfsptvProvider : MainAPI() {
             val nextApiUrl = buildYfsUrl("$apiBase/v3/video/getnextvideo", nextParams, pub, priv)
             Log.d(TAG, "load getnextvideo[${episodes.size}] url=$nextApiUrl")
             val nextEp = runCatching {
-                app.get(nextApiUrl).parsed<YfspApiResponse<YfspNextEp>>().data?.info?.firstOrNull()
+                apiGet(nextApiUrl).parsed<YfspApiResponse<YfspNextEp>>().data?.info?.firstOrNull()
             }.onFailure {
                 Log.e(TAG, "load getnextvideo EXCEPTION ${it.javaClass.simpleName}: ${it.message}, stopping chain")
             }.getOrNull() ?: break
@@ -320,7 +339,7 @@ class YfsptvProvider : MainAPI() {
         val masterUrl = "$uploadBase/api/video/MasterPlayList?id=$episodeId"
         Log.d(TAG, "loadLinks masterUrl=$masterUrl")
 
-        val m3u8Body = runCatching { app.get(masterUrl).text }
+        val m3u8Body = runCatching { apiGet(masterUrl).text }
             .onFailure { Log.e(TAG, "loadLinks MasterPlayList EXCEPTION ${it.javaClass.simpleName}: ${it.message}") }
             .getOrNull() ?: run {
                 Log.w(TAG, "loadLinks FAIL: could not fetch MasterPlayList for episodeId=$episodeId")
