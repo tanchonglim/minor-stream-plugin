@@ -310,10 +310,12 @@ class Kuhh4joProvider : MainAPI() {
             Log.w("Kuhh4joProvider", "loadLinks FAIL: data has no ':::' separator")
             return false
         }
-        val vodId = parts[0].toIntOrNull() ?: run {
-            Log.w("Kuhh4joProvider", "loadLinks FAIL: parts[0]='${parts[0]}' not an Int")
-            return false
-        }
+        val vodId = parts[0].toIntOrNull()
+            ?: Regex("""(\d+)\s*$""").find(parts[0])?.groupValues?.get(1)?.toIntOrNull()
+            ?: run {
+                Log.w("Kuhh4joProvider", "loadLinks FAIL: parts[0]='${parts[0]}' not an Int or URL with trailing ID")
+                return false
+            }
         val nid = parts[1].toLongOrNull() ?: run {
             Log.w("Kuhh4joProvider", "loadLinks FAIL: parts[1]='${parts[1]}' not a Long")
             return false
