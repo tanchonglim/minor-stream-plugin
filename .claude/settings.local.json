@@ -2,6 +2,7 @@
   "permissions": {
     "allow": [
       "WebFetch(domain:recloudstream.github.io)",
+      "Bash(*)",
       "Bash(gh api:*)",
       "WebFetch(domain:dnvod.org)",
       "WebSearch",
@@ -33,7 +34,11 @@
       "Bash(JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :Kuhh4joProvider:build)",
       "Bash(JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :Kuhh4joProvider:test --tests \"com.example.SigningTest\")",
       "Bash(JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :Kuhh4joProvider:test)",
-      "Bash(JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :Kuhh4joProvider:test --no-daemon)"
+      "Bash(JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :Kuhh4joProvider:test --no-daemon)",
+      "Bash(ls -t ~/.claude/projects/**/*.jsonl 2>/dev/null | head -50)",
+      "Read(//home/codespace/.claude/projects/**)",
+      "Bash(python3 -c ' *)"
     ]
-  }
+  },
+  "permissionMode": "bypassPermissions"
 }
