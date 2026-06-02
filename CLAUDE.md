@@ -29,8 +29,6 @@ version = 5  // was 4
 | Provider | Site | Version | Technique |
 |---|---|---|---|
 | [DnvodProvider](DnvodProvider/) | dnvod.org | 8 | HTML scrape + player config |
-| [DubokuProvider](DubokuProvider/) | duboku.ru | 8 | HTML scrape + `player_aaaa` JS config |
-| [CupfoxProvider](CupfoxProvider/) | cupfox.in | 4 | JSON API `/tea/{vodId}-{epSlug}` |
 | [OlevodProvider](OlevodProvider/) | olevod.com | 2 | `player_aaaa` JSON blob, Base64/URLdecode |
 | [IyftvProvider](IyftvProvider/) | iyf.tv | 4 | HTML scrape, CORS header workaround |
 | [Kuhh4joProvider](Kuhh4joProvider/) | kuhh4jo.com | 1 | Next.js + signed REST API |
@@ -39,22 +37,11 @@ version = 5  // was 4
 
 ## Provider Details
 
-### CupfoxProvider — `cupfox.in` (v4)
-- **Listing**: `GET /filter/?type={tv|movie|anime|show}&pg={page}` — HTML scrape, cards at `div[class*=movie-list-item]`
-- **Detail**: `GET /vod-detail/{vodId}` — episode buttons are `span[class*=play-btn][ep_slug]`
-- **Play URL**: `GET /tea/{vodId}-{epSlug}` → JSON `{video_plays:[{play_data, src_site}]}`
-- **Data encoding**: `{vodId}:::{epSlug}`
-- **Notes**: Use `www.cupfox.in` to avoid 301 redirect; episode slugs like `ep1`, `ep2`
-
 ### OlevodProvider — `olevod.com` (v2)
 - **Listing**: `GET /index.php/vod/type/id/{1-4,14}.html` — page 2+ uses `/page/{n}.html` suffix
 - **Detail**: `GET /index.php/vod/detail/id/{vodId}.html` — episodes via `a[href*=/vod/play/id/]`
 - **Play URL**: `GET /index.php/vod/play/id/{vodId}/sid/{sid}/nid/{nid}.html` — parse `player_aaaa` JS object from HTML, fields: `url`, `encrypt` (0=plain, 1=base64, 2=urlencode), `flag`
 - **Data encoding**: `{vodId}:::{sid}:::{nid}`
-
-### DubokuProvider — `duboku.ru`
-- **Play URL**: Parse `player_aaaa` JS object embedded in the play page HTML
-- **Data encoding**: Similar `:::` separator pattern
 
 ### IyftvProvider — `iyf.tv` (v4)
 - **Notes**: Requires `Origin` header workaround for CORS on API calls; HTML scraping
