@@ -13,15 +13,17 @@ import org.json.JSONObject
  * Uses the production API with the hardcoded fallback keys (fetched on demand in the
  * live provider).  All live tests are tagged with "live" in their names.
  *
- * Signing algorithm (reversed from main.js):
- *   qs      = params.joinToString("") { "key=value&" }   // trailing '&'
- *   signing = PUB_KEY + "&" + qs.lowercase() + PRIV_KEY
+ * Signing algorithm (reversed from main.js uriSignature + get_query):
+ *   qs      = params.joinToString("") { "key=value&" }   // trailing '&' per pair
+ *   signing = PUB_KEY + "&" + qs.lowercase() + PRIV_KEY  // equivalent to JS: pub+"&"+noTrailingQs+"&"+priv
  *   vv      = MD5(signing)
+ *
+ * Keys come from pConfig block in www.yfsp.tv/list HTML (not authConfig, which is the Cloudflare key).
  */
 class YfsptvProviderTest {
 
     private val pub  = YfsptvProvider.FALLBACK_PUB_KEY
-    private val priv = "SuC3JSuC3Gm" + pub.substring(8, 17)
+    private val priv = YfsptvProvider.FALLBACK_PRIV_KEY
 
     private fun signedUrl(base: String, params: Map<String, String>, urlParams: Map<String, String> = params): String =
         buildYfsUrl(base, params, pub, priv, urlParams)

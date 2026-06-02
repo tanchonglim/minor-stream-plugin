@@ -25,11 +25,12 @@ class YfsptvProvider : MainAPI() {
     companion object {
         private const val TAG = "YfsptvProvider"
 
-        // Long-lived fallback pub key; private key is derived via derivePrivKey().
-        // The live page serves short-lived session keys — this permanent key is used on retry.
-        internal const val FALLBACK_PUB_KEY = "CJSuC3GmCp4uDoutDJ9VKqTVCZ0tBZGsBZ8oD2uuD5yQc1ko6pARcXaOCJCQ6x4Pd9cP71gochAQc9oPcZ8QcQzCJKmC3TZEJXaOJbYDZ8rCZCqE3GuDZGpC38sDp0sOM3"
+        // Fallback keys from pConfig when the live page can't be fetched.
+        // pConfig.publicKey and pConfig.privateKey[0] from www.yfsp.tv/list as of 2026-06.
+        internal const val FALLBACK_PUB_KEY  = "CJSuC3GnC30uC2utEJDVKqTVCZ0tBZGsBZ8oD2uuD5yQcneRcvcS6XkRihCQ61aSd9op6Z8SCZAmcviSchCR62zEJ4tCMOoC6CtEMCpDMLXDMCqE3PcC68mC38tP6KuDZ5"
+        internal const val FALLBACK_PRIV_KEY = "SuC3JSuC3GnC30uC2utE"
 
-        @Volatile private var cachedPub: String? = null
+        @Volatile private var cachedKeys: Pair<String, String>? = null
     }
 
     override val mainPage = mainPageOf(
@@ -43,43 +44,52 @@ class YfsptvProvider : MainAPI() {
     // ── pConfig ─────────────────────────────────────────────────────────────
 
     /**
-     * Derives the private key from the public key using the site's fixed formula:
-     *   privKey = "SuC3JSuC3Gm" + pubKey[8..16]
+     * Derives privKey from pubKey: "SuC3JSuC3G" + pub[7..16].
+     * pub[7] varies per key rotation (e.g. 'm', 'n') — it must not be hardcoded.
+     * Used as fallback when pConfig.privateKey is absent from the HTML.
      */
-    private fun derivePrivKey(pub: String): String = "SuC3JSuC3Gm" + pub.substring(8, 17)
+    private fun derivePrivKey(pub: String): String = "SuC3JSuC3G" + pub.substring(7, 17)
 
-    /** Fetches publicKey from the HTML page's inline pConfig JSON. Private key is derived. */
+    /**
+     * Returns (publicKey, privateKey) from the pConfig block in www.yfsp.tv/list.
+     * The HTML embeds two publicKey fields: authConfig.publicKey (Cloudflare) comes first,
+     * then pConfig.publicKey (API signing key). We scope the regex to the pConfig section.
+     * privateKey is served directly in pConfig.privateKey[0]; derivation is used as fallback.
+     */
     private suspend fun getPConfig(): Pair<String, String> {
-        Log.d(TAG, "getPConfig START cacheHit=${cachedPub != null}")
-        cachedPub?.let { pub ->
-            val priv = derivePrivKey(pub)
-            Log.d(TAG, "getPConfig CACHE HIT pub=${pub.take(20)}…")
-            return pub to priv
+        Log.d(TAG, "getPConfig START cacheHit=${cachedKeys != null}")
+        cachedKeys?.let { keys ->
+            Log.d(TAG, "getPConfig CACHE HIT pub=${keys.first.take(20)}…")
+            return keys
         }
         return try {
             Log.d(TAG, "getPConfig fetching $mainUrl/list")
             val html = app.get("$mainUrl/list", interceptor = cfKiller).text
             Log.d(TAG, "getPConfig html length=${html.length}")
-            val pub = Regex(""""publicKey"\s*:\s*"([^"]+)"""").find(html)?.groupValues?.get(1)
+            // Scope extraction to the pConfig section — authConfig.publicKey appears first and must be skipped.
+            val pConfigSection = html.substringAfter("\"pConfig\"", "")
+            val pub  = Regex(""""publicKey"\s*:\s*"([^"]+)"""").find(pConfigSection)?.groupValues?.get(1)
+            val priv = Regex(""""privateKey"\s*:\s*\["([^"]+)"""").find(pConfigSection)?.groupValues?.get(1)
             if (pub != null && pub.length >= 17) {
-                val priv = derivePrivKey(pub)
-                Log.d(TAG, "getPConfig OK pub=${pub.take(20)}… priv=${priv.take(10)}…")
-                cachedPub = pub
-                pub to priv
+                val effectivePriv = priv ?: derivePrivKey(pub)
+                Log.d(TAG, "getPConfig OK pub=${pub.take(20)}… priv=${effectivePriv.take(10)}… (privFromHtml=${priv != null})")
+                val keys = pub to effectivePriv
+                cachedKeys = keys
+                keys
             } else {
-                Log.w(TAG, "getPConfig publicKey not found or too short (pub=${pub?.take(20)}), using fallback")
-                FALLBACK_PUB_KEY to derivePrivKey(FALLBACK_PUB_KEY)
+                Log.w(TAG, "getPConfig pConfig.publicKey not found or too short (pub=${pub?.take(20)}), using fallback")
+                FALLBACK_PUB_KEY to FALLBACK_PRIV_KEY
             }
         } catch (e: Exception) {
             Log.e(TAG, "getPConfig EXCEPTION ${e.javaClass.simpleName}: ${e.message}, using fallback")
-            FALLBACK_PUB_KEY to derivePrivKey(FALLBACK_PUB_KEY)
+            FALLBACK_PUB_KEY to FALLBACK_PRIV_KEY
         }
     }
 
-    /** Clears the cached public key, forcing a fresh fetch on the next getPConfig call. */
+    /** Clears the cached keys, forcing a fresh fetch on the next getPConfig call. */
     private fun invalidateKeyCache() {
-        Log.d(TAG, "invalidateKeyCache: clearing cachedPub")
-        cachedPub = null
+        Log.d(TAG, "invalidateKeyCache: clearing cachedKeys")
+        cachedKeys = null
     }
 
     /**
