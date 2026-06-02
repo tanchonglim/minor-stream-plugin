@@ -5,8 +5,8 @@ import com.lagradost.cloudstream3.plugins.CloudstreamPlugin
 import com.lagradost.cloudstream3.plugins.Plugin
 
 @CloudstreamPlugin
-class IyftvPlugin : Plugin() {
+class YfsptvPlugin : Plugin() {
     override fun load(context: Context) {
-        registerMainAPI(IyftvProvider())
+        registerMainAPI(YfsptvProvider())
     }
 }
