@@ -58,7 +58,11 @@ class Kuhh4joProvider : MainAPI() {
     // Dynamically fetch the signing key from the site's JS bundle.
     // Falls back to FALLBACK_SIGN_KEY on any error.
     private suspend fun getSignKey(): String {
-        cachedSignKey?.let { return it }
+        cachedSignKey?.let {
+            Log.d("Kuhh4joProvider", "getSignKey cache hit: $it")
+            return it
+        }
+        Log.d("Kuhh4joProvider", "getSignKey cache miss, fetching from JS bundle")
         return try {
             val html = app.get(mainUrl).text
             val chunkUrls = Regex("""/_next/static/chunks/[^\s"'<>]+\.js""")
@@ -66,20 +70,24 @@ class Kuhh4joProvider : MainAPI() {
                 .map { "$mainUrl${it.value}" }
                 .distinct()
                 .toList()
+            Log.d("Kuhh4joProvider", "getSignKey scanning ${chunkUrls.size} chunks")
             var result = FALLBACK_SIGN_KEY
             for (url in chunkUrls) {
                 val js = runCatching { app.get(url).text }.getOrNull() ?: continue
                 val key = Regex("""signKey\s*:\s*"([0-9a-f]{32})"""")
                     .find(js)?.groupValues?.get(1)
                 if (key != null) {
-                    Log.d("Kuhh4joProvider", "Fetched live signKey from $url")
+                    Log.d("Kuhh4joProvider", "getSignKey found key=$key in $url")
                     result = key
                     break
                 }
             }
+            if (result == FALLBACK_SIGN_KEY) {
+                Log.w("Kuhh4joProvider", "getSignKey not found in any chunk, using fallback=$result")
+            }
             result.also { cachedSignKey = it }
         } catch (e: Exception) {
-            Log.w("Kuhh4joProvider", "getSignKey failed, using fallback: ${e.message}")
+            Log.w("Kuhh4joProvider", "getSignKey exception, using fallback: ${e.message}")
             FALLBACK_SIGN_KEY
         }
     }
@@ -91,6 +99,8 @@ class Kuhh4joProvider : MainAPI() {
         val h = if (dataStr.isNotEmpty()) "$dataStr&key=$signKey&t=$timestamp"
                 else "key=$signKey&t=$timestamp"
         val sign = sha1(md5(h))
+        Log.d("Kuhh4joProvider", "makeSignHeaders signingStr=$h")
+        Log.d("Kuhh4joProvider", "makeSignHeaders sign=$sign t=$timestamp")
         return mapOf(
             "sign" to sign,
             "t" to timestamp.toString(),
@@ -234,12 +244,19 @@ class Kuhh4joProvider : MainAPI() {
     override suspend fun load(url: String): LoadResponse {
         val vodId = Regex("""/detail/(\d+)""").find(url)?.groupValues?.get(1)
             ?.toIntOrNull() ?: throw ErrorLoadingException("Invalid URL: $url")
-        Log.d("Kuhh4joProvider", "load vodId=$vodId url=$url")
+        Log.d("Kuhh4joProvider", "load START vodId=$vodId url=$url")
 
         val signKey = getSignKey()
         val params = mapOf("id" to vodId)
         val apiUrl = buildUrl("/anonymous/video/detail", params)
-        val resp = app.get(apiUrl, headers = makeSignHeaders(params, signKey)).parsed<DetailApiResponse>()
+        Log.d("Kuhh4joProvider", "load detailApiUrl=$apiUrl")
+
+        val rawDetail = app.get(apiUrl, headers = makeSignHeaders(params, signKey))
+        Log.d("Kuhh4joProvider", "load detail httpCode=${rawDetail.code} bodyLen=${rawDetail.text.length}")
+        Log.d("Kuhh4joProvider", "load detail body=${rawDetail.text.take(300)}")
+
+        val resp = rawDetail.parsed<DetailApiResponse>()
+        Log.d("Kuhh4joProvider", "load parsed code=${resp.code} hasData=${resp.data != null}")
         val detail = resp.data ?: throw ErrorLoadingException("No detail for vodId=$vodId")
 
         val title = detail.vodName?.trim()?.takeIf { it.isNotEmpty() }
@@ -251,24 +268,32 @@ class Kuhh4joProvider : MainAPI() {
             ?.map { it.trim() }?.filter { it.isNotEmpty() }
             ?.map { ActorData(Actor(it)) }
         val year = detail.vodYear?.trim()?.takeIf { it.isNotEmpty() }?.toIntOrNull()
+        Log.d("Kuhh4joProvider", "load title=$title typeId1=${detail.typeId1} year=$year episodeListSize=${detail.episodeList?.size}")
 
         val episodes = detail.episodeList
             ?.sortedWith(compareBy({ it.sort ?: Int.MAX_VALUE }, { it.nid ?: Long.MAX_VALUE }))
             ?.mapIndexedNotNull { i, ep ->
-                val nid = ep.nid ?: return@mapIndexedNotNull null
+                val nid = ep.nid ?: run {
+                    Log.w("Kuhh4joProvider", "load ep[$i] has null nid, skipping")
+                    return@mapIndexedNotNull null
+                }
                 val epName = ep.name?.trim()?.ifEmpty { null } ?: "第${i + 1}集"
                 val epNum = epName.toIntOrNull() ?: (i + 1)
-                newEpisode("$vodId:::$nid") {
+                val epData = "$vodId:::$nid"
+                Log.d("Kuhh4joProvider", "load ep[$i] name=$epName nid=$nid data=$epData")
+                newEpisode(epData) {
                     this.name = epName
                     this.episode = epNum
                 }
             } ?: emptyList()
-        Log.d("Kuhh4joProvider", "load title=$title episodes=${episodes.size}")
 
         val tvType = typeId1ToTvType(detail.typeId1)
+        Log.d("Kuhh4joProvider", "load episodes=${episodes.size} tvType=$tvType isMovie=${episodes.size <= 1}")
 
         return if (episodes.size <= 1) {
-            newMovieLoadResponse(title, url, TvType.Movie, episodes.firstOrNull()?.data ?: "") {
+            val movieData = episodes.firstOrNull()?.data ?: ""
+            Log.d("Kuhh4joProvider", "load -> MovieLoadResponse dataUrl=$movieData")
+            newMovieLoadResponse(title, url, TvType.Movie, movieData) {
                 this.posterUrl = posterUrl
                 this.plot = plot
                 this.tags = tags
@@ -276,6 +301,7 @@ class Kuhh4joProvider : MainAPI() {
                 this.year = year
             }
         } else {
+            Log.d("Kuhh4joProvider", "load -> TvSeriesLoadResponse ${episodes.size} episodes")
             newTvSeriesLoadResponse(title, url, tvType, episodes) {
                 this.posterUrl = posterUrl
                 this.plot = plot
@@ -292,52 +318,71 @@ class Kuhh4joProvider : MainAPI() {
         subtitleCallback: (SubtitleFile) -> Unit,
         callback: (ExtractorLink) -> Unit
     ): Boolean {
+        Log.d("Kuhh4joProvider", "loadLinks START data=$data isCasting=$isCasting")
+
         // data format: "vodId:::nid"
         val parts = data.split(":::")
+        Log.d("Kuhh4joProvider", "loadLinks parts=${parts.size} -> ${parts}")
         if (parts.size < 2) {
-            Log.w("Kuhh4joProvider", "loadLinks invalid data: $data")
+            Log.w("Kuhh4joProvider", "loadLinks FAIL: data has no ':::' separator")
             return false
         }
         val vodId = parts[0].toIntOrNull() ?: run {
-            Log.w("Kuhh4joProvider", "loadLinks: invalid vodId in data=$data")
+            Log.w("Kuhh4joProvider", "loadLinks FAIL: parts[0]='${parts[0]}' not an Int")
             return false
         }
         val nid = parts[1].toLongOrNull() ?: run {
-            Log.w("Kuhh4joProvider", "loadLinks: invalid nid in data=$data")
+            Log.w("Kuhh4joProvider", "loadLinks FAIL: parts[1]='${parts[1]}' not a Long")
             return false
         }
+        Log.d("Kuhh4joProvider", "loadLinks parsed vodId=$vodId nid=$nid")
 
         val signKey = getSignKey()
+        Log.d("Kuhh4joProvider", "loadLinks using signKey=$signKey")
+
         val params = mapOf("clientType" to 1, "id" to vodId, "nid" to nid)
         val url = buildUrl("/anonymous/v2/video/episode/url", params)
-        Log.d("Kuhh4joProvider", "loadLinks vodId=$vodId nid=$nid url=$url")
+        Log.d("Kuhh4joProvider", "loadLinks requestUrl=$url")
 
-        val resp = try {
-            app.get(url, headers = makeSignHeaders(params, signKey)).parsed<PlayApiResponse>()
+        val rawResp = try {
+            app.get(url, headers = makeSignHeaders(params, signKey))
         } catch (e: Exception) {
-            Log.e("Kuhh4joProvider", "loadLinks fetch failed: ${e.message}")
+            Log.e("Kuhh4joProvider", "loadLinks FAIL: HTTP request threw: ${e.javaClass.simpleName}: ${e.message}")
             return false
         }
 
-        Log.d("Kuhh4joProvider", "loadLinks resp.code=${resp.code} list=${resp.data?.list?.size}")
+        Log.d("Kuhh4joProvider", "loadLinks httpStatusCode=${rawResp.code}")
+        Log.d("Kuhh4joProvider", "loadLinks rawBody=${rawResp.text.take(800)}")
+
+        val resp = try {
+            rawResp.parsed<PlayApiResponse>()
+        } catch (e: Exception) {
+            Log.e("Kuhh4joProvider", "loadLinks FAIL: JSON parse threw: ${e.javaClass.simpleName}: ${e.message}")
+            return false
+        }
+
+        Log.d("Kuhh4joProvider", "loadLinks parsed apiCode=${resp.code} hasData=${resp.data != null} listSize=${resp.data?.list?.size}")
         if (resp.code != null && resp.code != 200) {
-            Log.w("Kuhh4joProvider", "loadLinks API error code=${resp.code}")
-            // Sign key may have rotated — clear cache so next call re-fetches it
+            Log.w("Kuhh4joProvider", "loadLinks FAIL: API error code=${resp.code}")
             cachedSignKey = null
             return false
         }
 
         val plays = resp.data?.list
         if (plays.isNullOrEmpty()) {
-            Log.w("Kuhh4joProvider", "loadLinks no play items returned")
+            Log.w("Kuhh4joProvider", "loadLinks FAIL: play list is null or empty")
             return false
         }
 
+        Log.d("Kuhh4joProvider", "loadLinks got ${plays.size} play items")
         var found = false
-        plays.forEach { play ->
-            val m3u8 = play.url?.trim()?.takeIf { it.isNotBlank() } ?: return@forEach
+        plays.forEachIndexed { i, play ->
+            Log.d("Kuhh4joProvider", "loadLinks play[$i] url=${play.url?.take(80)} res=${play.resolution} needLogin=${play.needLogin}")
+            val m3u8 = play.url?.trim()?.takeIf { it.isNotBlank() } ?: run {
+                Log.w("Kuhh4joProvider", "loadLinks play[$i] has blank url, skipping")
+                return@forEachIndexed
+            }
             val qualityName = play.resolutionName ?: "线路"
-            Log.d("Kuhh4joProvider", "loadLinks adding link: $qualityName needLogin=${play.needLogin}")
             callback.invoke(
                 newExtractorLink(
                     source = name,
@@ -349,8 +394,10 @@ class Kuhh4joProvider : MainAPI() {
                     this.quality = resolutionToQuality(play.resolution)
                 }
             )
+            Log.d("Kuhh4joProvider", "loadLinks play[$i] callback invoked for $qualityName")
             found = true
         }
+        Log.d("Kuhh4joProvider", "loadLinks END found=$found")
         return found
     }
 }
