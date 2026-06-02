@@ -30,7 +30,10 @@
       "Bash(find ~/.gradle/caches -path \"*/cloudstream3/*.jar\" 2>/dev/null | grep -v \".lock\" | head -5)",
       "Read(//home/codespace/.gradle/caches/**)",
       "Bash(xargs javap -p)",
-      "Bash(JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :Kuhh4joProvider:build)"
+      "Bash(JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :Kuhh4joProvider:build)",
+      "Bash(JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :Kuhh4joProvider:test --tests \"com.example.SigningTest\")",
+      "Bash(JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :Kuhh4joProvider:test)",
+      "Bash(JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew :Kuhh4joProvider:test --no-daemon)"
     ]
   }
 }

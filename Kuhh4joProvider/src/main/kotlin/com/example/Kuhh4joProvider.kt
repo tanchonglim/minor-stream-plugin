@@ -9,7 +9,6 @@ import com.lagradost.cloudstream3.utils.ExtractorLink
 import com.lagradost.cloudstream3.utils.ExtractorLinkType
 import com.lagradost.cloudstream3.utils.newExtractorLink
 import java.net.URLEncoder
-import java.security.MessageDigest
 
 class Kuhh4joProvider : MainAPI() {
     override var mainUrl = "https://www.kuhh4jo.com"
@@ -22,12 +21,12 @@ class Kuhh4joProvider : MainAPI() {
         TvType.Anime
     )
 
-    private val apiBase = "$mainUrl/mw-movie"
+    private val apiBase = "$mainUrl/api/mw-movie"
 
     // Fallback sign key extracted from JS bundle (chunk 5055, axios interceptor).
     // getSignKey() tries to fetch the live value on first use.
     companion object {
-        private const val FALLBACK_SIGN_KEY = "cb808529bae6b6be45ecfab29a4889bc"
+        internal const val FALLBACK_SIGN_KEY = "cb808529bae6b6be45ecfab29a4889bc"
         @Volatile private var cachedSignKey: String? = null
     }
 
@@ -42,18 +41,7 @@ class Kuhh4joProvider : MainAPI() {
         "88" to "短剧",
     )
 
-    // --- Signing (reverse-engineered from JS chunk 2844, module 49858) ---
-    // Algorithm: sign = SHA1( MD5( sortedParams + "&key=" + signKey + "&t=" + timestamp_ms ) )
-
-    private fun md5(input: String): String {
-        val bytes = MessageDigest.getInstance("MD5").digest(input.toByteArray(Charsets.UTF_8))
-        return bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-    }
-
-    private fun sha1(input: String): String {
-        val bytes = MessageDigest.getInstance("SHA-1").digest(input.toByteArray(Charsets.UTF_8))
-        return bytes.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
-    }
+    // Signing utilities (md5, sha1, buildSign) live in SigningUtils.kt — pure JVM, no Android deps.
 
     // Dynamically fetch the signing key from the site's JS bundle.
     // Falls back to FALLBACK_SIGN_KEY on any error.
@@ -94,12 +82,7 @@ class Kuhh4joProvider : MainAPI() {
 
     private fun makeSignHeaders(params: Map<String, Any>, signKey: String): Map<String, String> {
         val timestamp = System.currentTimeMillis()
-        val dataStr = params.entries.sortedBy { it.key }
-            .joinToString("&") { "${it.key}=${it.value}" }
-        val h = if (dataStr.isNotEmpty()) "$dataStr&key=$signKey&t=$timestamp"
-                else "key=$signKey&t=$timestamp"
-        val sign = sha1(md5(h))
-        Log.d("Kuhh4joProvider", "makeSignHeaders signingStr=$h")
+        val sign = buildSign(params, signKey, timestamp)
         Log.d("Kuhh4joProvider", "makeSignHeaders sign=$sign t=$timestamp")
         return mapOf(
             "sign" to sign,
