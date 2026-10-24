@@ -2,9 +2,9 @@ package com.example
 
 import com.lagradost.cloudstream3.*
 import com.lagradost.cloudstream3.utils.*
-import com.lagradost.cloudstream3.utils.AppUtils.tryParseJson
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import org.jsoup.nodes.Element
 import java.net.URLDecoder
 import java.net.URLEncoder
@@ -176,6 +176,15 @@ class GimyProvider : MainAPI() {
         @JsonProperty("sid") val sid: Int?,
     )
 
+    private val jsonMapper = jacksonObjectMapper()
+
+    // Not AppUtils.tryParseJson: it's inline and built for JVM 11, which can't inline into our JVM 1.8 target
+    private fun parsePlayer(json: String): PlayerAaaa? = try {
+        jsonMapper.readValue(json, PlayerAaaa::class.java)
+    } catch (_: Exception) {
+        null
+    }
+
     /** Extracts the `player_aaaa={...}` JSON blob by walking braces. */
     private fun extractPlayerAaaa(html: String): PlayerAaaa? {
         val markerIdx = html.indexOf("player_aaaa")
@@ -192,7 +201,7 @@ class GimyProvider : MainAPI() {
             } else when (c) {
                 '"' -> inString = true
                 '{' -> depth++
-                '}' -> if (--depth == 0) return tryParseJson<PlayerAaaa>(html.substring(start, i + 1))
+                '}' -> if (--depth == 0) return parsePlayer(html.substring(start, i + 1))
             }
             i++
         }
