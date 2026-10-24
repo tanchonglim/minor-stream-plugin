@@ -1,4 +1,4 @@
-version = 1
+version = 2
 
 cloudstream {
     description = "劇迷 Gimy (gimy.se) - Movies, TV Shows, Variety, Anime, Documentaries"
